@@ -1,4 +1,5 @@
 /* global AbortController */
+import { default as fetchRetry } from '@adobe/node-fetch-retry';
 import JSONStream from 'JSONStream';
 import buildDebug from 'debug';
 import _ from 'lodash';
@@ -20,6 +21,7 @@ import {
   validatioUtils,
 } from '@verdaccio/core';
 import { ReadTarball } from '@verdaccio/streams';
+import { Manifest } from '@verdaccio/types';
 import { Callback, Config, IReadTarball, Logger, UpLinkConf } from '@verdaccio/types';
 import { buildToken } from '@verdaccio/utils';
 
@@ -195,10 +197,8 @@ class ProxyStorage implements IProxy {
       ? function (err, res, body): void {
           let error;
           const responseLength = err ? 0 : body.length;
-          // $FlowFixMe
           processBody();
           logActivity();
-          // $FlowFixMe
           cb(err, res, body);
 
           /**
@@ -437,6 +437,44 @@ class ProxyStorage implements IProxy {
     for (const key in this.config.headers) {
       headers[key] = this.config.headers[key];
     }
+  }
+
+  public async getRemoteMetadataNext(name: string, options: any): Promise<[Manifest, string]> {
+    const headers = {};
+    if (_.isNil(options.etag) === false) {
+      headers['If-None-Match'] = options.etag;
+      headers[HEADERS.ACCEPT] = contentTypeAccept;
+    }
+    const method = options.method || 'GET';
+    const uri = this.config.url + `/${encode(name)}`;
+    const response = await fetchRetry(uri, {
+      headers,
+      method,
+      retryOptions: options.retryOptions,
+      //   retryOnHttpResponse: function (response) {
+      //     if (response.status >= 500) {
+      //       // retry on all 5xx and all 4xx errors
+      //       return true;
+      //     }
+      //   },
+      // },
+    });
+    // console.log('response', response.status);
+    if (response.status === HTTP_STATUS.NOT_FOUND) {
+      throw errorUtils.getNotFound(errorUtils.API_ERROR.NOT_PACKAGE_UPLINK);
+    }
+
+    if (!(response.status >= HTTP_STATUS.OK && response.status < HTTP_STATUS.MULTIPLE_CHOICES)) {
+      const error = errorUtils.getInternalError(
+        `${errorUtils.API_ERROR.BAD_STATUS_CODE}: ${response.status}`
+      );
+
+      error.remoteStatus = response.status;
+      throw error;
+    }
+    const etag = response.headers.get('etag') as string;
+    const data = await response.json();
+    return [data, etag];
   }
 
   /**

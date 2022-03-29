@@ -2,7 +2,7 @@ import { Command, Option } from 'clipanion';
 
 import { findConfigFile, parseConfigFile } from '@verdaccio/config';
 import { logger, setup } from '@verdaccio/logger';
-import { LoggerConfigItem } from '@verdaccio/logger/src/logger';
+import { LoggerConfigItem } from '@verdaccio/logger';
 import { initServer } from '@verdaccio/node-api';
 import { ConfigRuntime } from '@verdaccio/types';
 

@@ -41,7 +41,73 @@ describe('proxy', () => {
   const proxyPath = getConf('proxy1.yaml');
   const conf = new Config(parseConfigFile(proxyPath));
 
-  describe('getRemoteMetadata', () => {
+  describe('getRemoteMetadataNext', () => {
+    describe('basic requests', () => {
+      test('proxy call with etag', async () => {
+        nock(domain)
+          .get('/jquery')
+          .reply(
+            200,
+            { body: 'test' },
+            {
+              etag: () => `_ref_4444`,
+            }
+          );
+        const prox1 = new ProxyStorage(defaultRequestOptions, conf);
+        const [body, etag] = await prox1.getRemoteMetadataNext('jquery', {});
+        expect(etag).toEqual('_ref_4444');
+        expect(body).toEqual({ body: 'test' });
+      });
+
+      test('proxy call with etag as option', async () => {
+        nock(domain)
+          .get('/jquery')
+          .reply(
+            200,
+            { body: 'test' },
+            {
+              etag: () => `_ref_4444`,
+            }
+          );
+        const prox1 = new ProxyStorage(defaultRequestOptions, conf);
+        const [body, etag] = await prox1.getRemoteMetadataNext('jquery', { etag: 'rev_3333' });
+        expect(etag).toEqual('_ref_4444');
+        expect(body).toEqual({ body: 'test' });
+      });
+
+      test('proxy  not found', async () => {
+        nock(domain).get('/jquery').reply(404);
+        const prox1 = new ProxyStorage(defaultRequestOptions, conf);
+        await expect(prox1.getRemoteMetadataNext('jquery', { etag: 'rev_3333' })).rejects.toThrow(
+          errorUtils.getNotFound(API_ERROR.NOT_PACKAGE_UPLINK)
+        );
+      });
+    });
+
+    describe('error handling', () => {
+      test('reply with 500 error', async () => {
+        nock(domain).get('/jquery').replyWithError('something awful happened');
+        const prox1 = new ProxyStorage(defaultRequestOptions, conf);
+        await expect(
+          prox1.getRemoteMetadataNext('jquery', { retryOptions: false })
+        ).rejects.toThrow(
+          new Error(
+            'request to https://registry.npmjs.org/jquery failed, reason: something awful happened'
+          )
+        );
+      });
+
+      test('reply with 409 error', async () => {
+        nock(domain).get('/jquery').reply(409);
+        const prox1 = new ProxyStorage(defaultRequestOptions, conf);
+        await expect(
+          prox1.getRemoteMetadataNext('jquery', { retryOptions: false })
+        ).rejects.toThrow(new Error('bad status code: 409'));
+      });
+    });
+  });
+
+  describe.skip('getRemoteMetadata', () => {
     describe('basic requests', () => {
       test('proxy call with etag', (done) => {
         nock(domain)
