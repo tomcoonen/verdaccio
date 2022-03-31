@@ -2,12 +2,15 @@ import nock from 'nock';
 import * as httpMocks from 'node-mocks-http';
 
 import { Config } from '@verdaccio/config';
-import { HEADERS, errorUtils } from '@verdaccio/core';
+import { API_ERROR, DIST_TAGS, HEADERS, errorUtils } from '@verdaccio/core';
 import { setup } from '@verdaccio/logger';
 import { configExample, generateRamdonStorage } from '@verdaccio/mock';
 import { generatePackageMetadata } from '@verdaccio/test-helper';
 
 import { Storage } from '../src';
+import manifestFooRemoteNpmjs from './fixtures/manifests/foo-npmjs.json';
+
+// import manifestFooRemoteVerdaccio from './fixtures/manifests/foo-verdaccio.json';
 
 setup([]);
 
@@ -21,6 +24,7 @@ describe('storage', () => {
     nock.abortPendingRequests();
     jest.clearAllMocks();
   });
+
   describe('add packages', () => {
     test('add package item', async () => {
       nock(domain).get('/foo').reply(404);
@@ -36,6 +40,199 @@ describe('storage', () => {
         expect(err).toBeNull();
       });
     });
+  });
+
+  describe('syncUplinksMetadataNext()', () => {
+    test('should handle double failure on uplinks with timeout', async () => {
+      const fooManifest = generatePackageMetadata('foo', '8.0.0');
+      nock('https://registry.npmjs.org').get('/foo').delay(2000).reply(201, manifestFooRemoteNpmjs);
+      nock('https://registry.verdaccio.org').get('/foo').replyWithError('service in holidays');
+      const config = new Config(
+        configExample(
+          {
+            storage: generateRamdonStorage(),
+          },
+          './fixtures/config/syncDoubleUplinksMetadata.yaml',
+          __dirname
+        )
+      );
+      const storage = new Storage(config);
+      await storage.init(config);
+      await expect(
+        storage.syncUplinksMetadataNext(fooManifest.name, fooManifest, {
+          retry: 0,
+          timeout: {
+            lookup: 100,
+            connect: 50,
+            secureConnect: 50,
+            socket: 500,
+            // send: 10000,
+            response: 1000,
+          },
+        })
+      ).rejects.toThrow('ETIMEDOUT');
+    }, 10000);
+
+    test('should handle one proxy fails', async () => {
+      const fooManifest = generatePackageMetadata('foo', '8.0.0');
+      nock('https://registry.verdaccio.org').get('/foo').replyWithError('service in holidays');
+      const config = new Config(
+        configExample(
+          {
+            storage: generateRamdonStorage(),
+          },
+          './fixtures/config/syncSingleUplinksMetadata.yaml',
+          __dirname
+        )
+      );
+      const storage = new Storage(config);
+      await storage.init(config);
+      await expect(
+        storage.syncUplinksMetadataNext(fooManifest.name, fooManifest, {
+          retry: 0,
+        })
+      ).rejects.toThrow(API_ERROR.NO_PACKAGE);
+    });
+
+    test('should handle one proxy reply 304', async () => {
+      const fooManifest = generatePackageMetadata('foo', '8.0.0');
+      nock('https://registry.verdaccio.org').get('/foo').reply(304);
+      const config = new Config(
+        configExample(
+          {
+            storage: generateRamdonStorage(),
+          },
+          './fixtures/config/syncSingleUplinksMetadata.yaml',
+          __dirname
+        )
+      );
+      const storage = new Storage(config);
+      await storage.init(config);
+      await expect(
+        storage.syncUplinksMetadataNext(fooManifest.name, fooManifest, {
+          retry: 0,
+        })
+      ).rejects.toThrow(API_ERROR.NOT_MODIFIED_NO_DATA);
+    });
+
+    test('should handle one proxy success', async () => {
+      const fooManifest = generatePackageMetadata('foo', '8.0.0');
+      nock('https://registry.verdaccio.org').get('/foo').reply(201, manifestFooRemoteNpmjs);
+      const config = new Config(
+        configExample(
+          {
+            storage: generateRamdonStorage(),
+          },
+          './fixtures/config/syncSingleUplinksMetadata.yaml',
+          __dirname
+        )
+      );
+      const storage = new Storage(config);
+      await storage.init(config);
+
+      const response = await storage.syncUplinksMetadataNext(fooManifest.name, fooManifest);
+      expect(response.name).toEqual(fooManifest.name);
+      expect(response[DIST_TAGS].latest).toEqual('8.0.0');
+    });
+
+    test('should handle no proxy found', async () => {
+      const fooManifest = generatePackageMetadata('foo', '8.0.0');
+      nock('https://registry.verdaccio.org').get('/foo').reply(201, manifestFooRemoteNpmjs);
+      const config = new Config(
+        configExample(
+          {
+            storage: generateRamdonStorage(),
+          },
+          './fixtures/config/syncNoUplinksMetadata.yaml',
+          __dirname
+        )
+      );
+      const storage = new Storage(config);
+      await storage.init(config);
+
+      const response = await storage.syncUplinksMetadataNext(fooManifest.name, fooManifest);
+      expect(response.name).toEqual(fooManifest.name);
+      expect(response[DIST_TAGS].latest).toEqual('8.0.0');
+    });
+
+    test('should handle disable uplinks via options.uplinksLook=false', async () => {
+      const fooManifest = generatePackageMetadata('foo', '8.0.0');
+      nock('https://registry.verdaccio.org').get('/foo').reply(201, manifestFooRemoteNpmjs);
+      const config = new Config(
+        configExample(
+          {
+            storage: generateRamdonStorage(),
+          },
+          './fixtures/config/syncSingleUplinksMetadata.yaml',
+          __dirname
+        )
+      );
+      const storage = new Storage(config);
+      await storage.init(config);
+
+      const response = await storage.syncUplinksMetadataNext(fooManifest.name, fooManifest, {
+        uplinksLook: false,
+      });
+      expect(response.name).toEqual(fooManifest.name);
+      expect(response[DIST_TAGS].latest).toEqual('8.0.0');
+    });
+
+    test('should handle one proxy success with clean metadata', async () => {
+      nock('https://registry.verdaccio.org').get('/foo').reply(201, manifestFooRemoteNpmjs);
+      const config = new Config(
+        configExample(
+          {
+            storage: generateRamdonStorage(),
+          },
+          './fixtures/config/syncSingleUplinksMetadata.yaml',
+          __dirname
+        )
+      );
+      const storage = new Storage(config);
+      await storage.init(config);
+
+      // @ts-expect-error
+      const response = await storage.syncUplinksMetadataNext(fooManifest.name, {});
+      expect(response.name).toEqual(fooManifest.name);
+      // the latest from the remote manifest
+      expect(response[DIST_TAGS].latest).toEqual('0.0.7');
+    });
+
+    // test('should handle all proxy fails', async () => {
+    //   const fooManifest = generatePackageMetadata('foo', '8.0.0');
+    //   nock('https://registry.npmjs.org').get('/foo').reply(201, manifestFooRemoteNpmjs);
+    //   nock('https://registry.verdaccio.org').get('/foo').replyWithError('service in holidays');
+    //   const config = new Config(
+    //     configExample(
+    //       {
+    //         storage: generateRamdonStorage(),
+    //       },
+    //       './fixtures/config/syncUplinksMetadata.yaml',
+    //       __dirname
+    //     )
+    //   );
+    //   const storage = new Storage(config);
+    //   await storage.init(config);
+    //   await storage.syncUplinksMetadataNext(fooManifest.name, fooManifest, { retry: 0 });
+    // });
+
+    // test('should secondary proxy override primary proxy', async () => {
+    //   const fooManifest = generatePackageMetadata('foo', '8.0.0');
+    //   nock('https://registry.npmjs.org').get('/foo').reply(201, manifestFooRemoteNpmjs);
+    //   nock('https://registry.verdaccio.org').get('/foo').replyWithError('service in holidays');
+    //   const config = new Config(
+    //     configExample(
+    //       {
+    //         storage: generateRamdonStorage(),
+    //       },
+    //       './fixtures/config/syncUplinksMetadata.yaml',
+    //       __dirname
+    //     )
+    //   );
+    //   const storage = new Storage(config);
+    //   await storage.init(config);
+    //   await storage.syncUplinksMetadataNext(fooManifest.name, fooManifest, { retry: 0 });
+    // });
   });
 
   // TODO: getPackageNext should replace getPackage eventually

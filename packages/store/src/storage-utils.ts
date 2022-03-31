@@ -3,7 +3,7 @@ import semver from 'semver';
 
 import { errorUtils, pkgUtils, validatioUtils } from '@verdaccio/core';
 import { API_ERROR, DIST_TAGS, HTTP_STATUS, USERS } from '@verdaccio/core';
-import { AttachMents, Package, StringValue, Version, Versions } from '@verdaccio/types';
+import { AttachMents, Manifest, Package, StringValue, Version, Versions } from '@verdaccio/types';
 import { generateRandomHexString, isNil, isObject, normalizeDistTags } from '@verdaccio/utils';
 
 import { LocalStorage } from './local-storage';
@@ -200,6 +200,32 @@ export function mergeUplinkTimeIntoLocal(localMetadata: Package, remoteMetadata:
   return localMetadata.time;
 }
 
+export function mergeUplinkTimeIntoLocalNext(
+  cacheManifest: Package,
+  remoteManifest: Package
+): Package {
+  if ('time' in remoteManifest) {
+    // remote override cache times
+    return { ...cacheManifest, time: { ...cacheManifest.time, ...remoteManifest.time } };
+  }
+
+  return cacheManifest;
+}
+
+export function updateUpLinkMetadata(uplinkId, manifest: Package, etag: string) {
+  const _uplinks = {
+    ...manifest._uplinks,
+    [uplinkId]: {
+      etag,
+      fetched: Date.now(),
+    },
+  };
+  return {
+    ...manifest,
+    _uplinks,
+  };
+}
+
 export function prepareSearchPackage(data: Package): any {
   const latest = pkgUtils.getLatest(data);
 
@@ -260,4 +286,44 @@ export function hasInvalidPublishBody(manifest: Pick<Package, '_attachments' | '
     isObject(versions) === false ||
     isDifferentThanOne(versions);
   return res;
+}
+
+/**
+ * Function gets a local info and an info from uplinks and tries to merge it
+ exported for unit tests only.
+  * @param {*} local
+  * @param {*} remoteManifest
+  * @param {*} config configuration file
+  */
+export function mergeVersions(cacheManifest: Manifest, remoteManifest: Manifest): Manifest {
+  let _cacheManifest = { ...cacheManifest };
+  const { versions } = remoteManifest;
+  // copy new versions to a cache
+  // NOTE: if a certain version was updated, we can't refresh it reliably
+  for (const i in versions) {
+    if (typeof cacheManifest.versions[i] === 'undefined') {
+      _cacheManifest.versions[i] = versions[i];
+    }
+  }
+
+  for (const distTag in remoteManifest[DIST_TAGS]) {
+    if (_cacheManifest[DIST_TAGS][distTag] !== remoteManifest[DIST_TAGS][distTag]) {
+      if (
+        !_cacheManifest[DIST_TAGS][distTag] ||
+        semver.lte(_cacheManifest[DIST_TAGS][distTag], remoteManifest[DIST_TAGS][distTag])
+      ) {
+        _cacheManifest[DIST_TAGS][distTag] = remoteManifest[DIST_TAGS][distTag];
+      }
+      if (
+        distTag === 'latest' &&
+        _cacheManifest[DIST_TAGS][distTag] === remoteManifest[DIST_TAGS][distTag]
+      ) {
+        // NOTE: this override the latest publish readme from local cache with
+        // the remote one
+        cacheManifest = { ..._cacheManifest, readme: remoteManifest.readme };
+      }
+    }
+  }
+
+  return cacheManifest;
 }

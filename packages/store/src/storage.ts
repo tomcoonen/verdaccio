@@ -14,7 +14,7 @@ import {
 } from '@verdaccio/core';
 import { logger } from '@verdaccio/logger';
 import { ProxyStorage } from '@verdaccio/proxy';
-import { IProxy, ProxyList } from '@verdaccio/proxy';
+import { IProxy, ISyncUplinksOptions, ProxyList } from '@verdaccio/proxy';
 import { ReadTarball } from '@verdaccio/streams';
 import {
   convertDistRemoteToLocalTarballUrls,
@@ -29,6 +29,7 @@ import {
   IReadTarball,
   IUploadTarball,
   Logger,
+  Manifest,
   MergeTags,
   Package,
   StringValue,
@@ -48,11 +49,18 @@ import {
   cleanUpLinksRef,
   generatePackageTemplate,
   mergeUplinkTimeIntoLocal,
+  mergeUplinkTimeIntoLocalNext,
+  mergeVersions,
   publishPackage,
+  updateUpLinkMetadata,
 } from './storage-utils';
 import { IGetPackageOptions, IGetPackageOptionsNext, IPluginFilters, ISyncUplinks } from './type';
 // import { StarBody, Users } from './type';
-import { setupUpLinks, updateVersionsHiddenUpLink } from './uplink-util';
+import {
+  setupUpLinks,
+  updateVersionsHiddenUpLink,
+  updateVersionsHiddenUpLinkNext,
+} from './uplink-util';
 
 const debug = buildDebug('verdaccio:storage');
 class Storage {
@@ -537,7 +545,7 @@ class Storage {
       // time to sync with uplinks if we have any
       debug('sync uplinks for %o', name);
       // @ts-expect-error
-      return this._syncUplinksMetadataNext(name, data, {
+      return this._syncUplinksMetadataPackageNext(name, data, {
         req: options.req,
         uplinksLook: options.uplinksLook,
         keepUpLinkData: options.keepUpLinkData,
@@ -551,17 +559,17 @@ class Storage {
     }
   }
 
-  private _syncUplinksMetadataNext(
+  private _syncUplinksMetadataPackageNext(
     name: string,
-    data: Package,
+    data: Manifest,
     { uplinksLook, keepUpLinkData, req }
-  ): Promise<[Package, any[]]> {
+  ): Promise<[Manifest, any[]]> {
     return new Promise((resolve, reject) => {
       this._syncUplinksMetadata(
         name,
         data,
         { req: req, uplinksLook },
-        function getPackageSynUpLinksCallback(err, result: Package, uplinkErrors): void {
+        function getPackageSynUpLinksCallback(err, result: Manifest, uplinkErrors): void {
           if (err) {
             debug('error on sync package for %o with error %o', name, err?.message);
             return reject(err);
@@ -686,7 +694,122 @@ class Storage {
     }
   }
 
-  // notas, debo migrar _syncUplinksMetadata algo mas lindo
+  public async syncUplinksMetadataNext(
+    name: string,
+    packageInfo: Manifest,
+    options: ISyncUplinksOptions = {}
+  ): Promise<Manifest> {
+    let found = false;
+    let syncManifest = {} as Manifest;
+    const upLinks: Promise<Manifest>[] = [];
+    const hasToLookIntoUplinks = _.isNil(options.uplinksLook) || options.uplinksLook;
+    debug('is sync uplink enabled %o', hasToLookIntoUplinks);
+    // ensure package has enough data
+    if (_.isNil(packageInfo) || _.isEmpty(packageInfo)) {
+      syncManifest = generatePackageTemplate(name);
+    } else {
+      syncManifest = { ...packageInfo };
+    }
+
+    for (const uplink in this.uplinks) {
+      if (hasProxyTo(name, uplink, this.config.packages) && hasToLookIntoUplinks) {
+        upLinks.push(this.mergeCacheRemoteMetadata(this.uplinks[uplink], syncManifest, options));
+      }
+    }
+
+    if (upLinks.length === 0) {
+      return syncManifest;
+    }
+
+    const errors: any[] = [];
+    // we resolve uplinks async in serie, first come first serve
+    for (const uplinkRequest of upLinks) {
+      try {
+        syncManifest = await uplinkRequest;
+        found = true;
+        break;
+      } catch (err: any) {
+        errors.push(err);
+        continue;
+      }
+    }
+    if (found) {
+      return syncManifest;
+    } else {
+      // console.log('errors', errors);
+      debug('uplinks sync failed with %o errors', errors.length);
+      for (const err of errors) {
+        const { code } = err;
+        if (code === 'ETIMEDOUT' || code === 'ESOCKETTIMEDOUT' || code === 'ECONNRESET') {
+          throw errorUtils.getServiceUnavailable(err.code);
+        }
+        // we bubble up the 304 special error case
+        if (code === HTTP_STATUS.NOT_MODIFIED) {
+          throw err;
+        }
+      }
+      throw errorUtils.getNotFound(API_ERROR.NO_PACKAGE);
+    }
+  }
+
+  public async mergeCacheRemoteMetadata(
+    uplink: IProxy,
+    cachedManifest: Manifest,
+    options: any
+  ): Promise<Manifest> {
+    // we store which uplink is updating the manifest
+    const upLinkMeta = cachedManifest._uplinks[uplink.upname];
+    let _cacheManifest = { ...cachedManifest };
+
+    if (validatioUtils.isObject(upLinkMeta)) {
+      const fetched = upLinkMeta.fetched;
+
+      if (fetched && Date.now() - fetched < uplink.maxage) {
+        return cachedManifest;
+      }
+    }
+
+    const remoteOptions = Object.assign({}, options, {
+      etag: upLinkMeta?.etag,
+    });
+
+    try {
+      const [remoteManifest, etag] = await uplink.getRemoteMetadataNext(
+        _cacheManifest.name,
+        remoteOptions
+      );
+      try {
+        _cacheManifest = validatioUtils.validateMetadata(remoteManifest, _cacheManifest.name);
+      } catch (err: any) {
+        this.logger.error(
+          {
+            err: err,
+          },
+          'package.json validating error @{!err?.message}\n@{err.stack}'
+        );
+        throw err;
+      }
+
+      _cacheManifest = updateUpLinkMetadata(uplink.upname, _cacheManifest, etag);
+      _cacheManifest = mergeUplinkTimeIntoLocalNext(_cacheManifest, remoteManifest);
+      _cacheManifest = updateVersionsHiddenUpLinkNext(cachedManifest, uplink);
+      try {
+        _cacheManifest = mergeVersions(_cacheManifest, remoteManifest);
+        return _cacheManifest;
+      } catch (err: any) {
+        this.logger.error(
+          {
+            err: err,
+          },
+          'package.json mergin has failed @{!err?.message}\n@{err.stack}'
+        );
+        throw err;
+      }
+    } catch (error: any) {
+      this.logger.error('merge uplinks data has failed');
+      throw error;
+    }
+  }
 
   /**
    * Function fetches package metadata from uplinks and synchronizes it with local data
@@ -731,7 +854,7 @@ class Storage {
             return cb();
           }
 
-          _options.etag = upLinkMeta.etag;
+          _options.etag = upLinkMeta?.etag;
         }
 
         upLink.getRemoteMetadata(name, _options, (err, upLinkResponse, eTag): void => {

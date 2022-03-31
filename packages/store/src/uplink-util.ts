@@ -1,5 +1,5 @@
 import { IProxy, ProxyList, ProxyStorage } from '@verdaccio/proxy';
-import { Config, Versions } from '@verdaccio/types';
+import { Config, Manifest, Versions } from '@verdaccio/types';
 
 /**
  * Set up the Up Storage for each link.
@@ -20,6 +20,7 @@ export function setupUpLinks(config: Config): ProxyList {
   return uplinks;
 }
 
+// @deprecated
 export function updateVersionsHiddenUpLink(versions: Versions, upLink: IProxy): void {
   for (const i in versions) {
     if (Object.prototype.hasOwnProperty.call(versions, i)) {
@@ -29,4 +30,19 @@ export function updateVersionsHiddenUpLink(versions: Versions, upLink: IProxy): 
       version[Symbol.for('__verdaccio_uplink')] = upLink.upname;
     }
   }
+}
+
+export function updateVersionsHiddenUpLinkNext(manifest: Manifest, upLink: IProxy): Manifest {
+  const { versions } = manifest;
+  const versionsList = Object.keys(versions);
+  if (versionsList.length === 0) {
+    return manifest;
+  }
+
+  for (const version of versionsList) {
+    // holds a "hidden" value to be used by the package storage.
+    versions[version][Symbol.for('__verdaccio_uplink')] = upLink.upname;
+  }
+
+  return { ...manifest, versions: versions };
 }

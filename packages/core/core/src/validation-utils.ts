@@ -62,27 +62,28 @@ export function validatePackage(name: string): boolean {
 /**
  * Validate the package metadata, add additional properties whether are missing within
  * the metadata properties.
- * @param {*} object
+ * @param {*} manifest
  * @param {*} name
  * @return {Object} the object with additional properties as dist-tags ad versions
  */
-export function validateMetadata(object: Package, name: string): Package {
-  assert(isObject(object), 'not a json object');
-  assert.strictEqual(object.name, name);
+export function validateMetadata(manifest: Package, name: string): Package {
+  assert(isObject(manifest), 'not a json object');
+  assert.strictEqual(manifest.name, name);
+  const _manifest = { ...manifest };
 
-  if (!isObject(object[DIST_TAGS])) {
-    object[DIST_TAGS] = {};
+  if (!isObject(manifest[DIST_TAGS])) {
+    _manifest[DIST_TAGS] = {};
   }
 
-  if (!isObject(object['versions'])) {
-    object['versions'] = {};
+  if (!isObject(manifest['versions'])) {
+    _manifest['versions'] = {};
   }
 
-  if (!isObject(object['time'])) {
-    object['time'] = {};
+  if (!isObject(manifest['time'])) {
+    _manifest['time'] = {};
   }
 
-  return object;
+  return _manifest;
 }
 
 /**

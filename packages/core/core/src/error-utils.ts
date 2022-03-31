@@ -20,6 +20,7 @@ export const API_ERROR = {
   NOT_PACKAGE_UPLINK: 'package does not exist on uplink',
   UPLINK_OFFLINE_PUBLISH: 'one of the uplinks is down, refuse to publish',
   UPLINK_OFFLINE: 'uplink is offline',
+  NOT_MODIFIED_NO_DATA: 'no data',
   CONTENT_MISMATCH: 'content length mismatch',
   NOT_FILE_UPLINK: "file doesn't exist on uplink",
   MAX_USERS_REACHED: 'maximum amount of users reached',

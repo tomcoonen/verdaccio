@@ -1,7 +1,8 @@
 /* global AbortController */
-import { default as fetchRetry } from '@adobe/node-fetch-retry';
 import JSONStream from 'JSONStream';
 import buildDebug from 'debug';
+import got from 'got';
+import type { Options } from 'got';
 import _ from 'lodash';
 import requestDeprecated from 'request';
 import Stream, { PassThrough, Readable } from 'stream';
@@ -9,6 +10,7 @@ import { Headers, fetch as undiciFetch } from 'undici';
 import { URL } from 'url';
 
 import {
+  API_ERROR,
   CHARACTER_ENCODING,
   HEADERS,
   HEADER_TYPE,
@@ -75,6 +77,12 @@ export interface IProxy {
   fetchTarball(url: string): IReadTarball;
   search(options: ProxySearchParams): Promise<Stream.Readable>;
   getRemoteMetadata(name: string, options: any, callback: Callback): void;
+  getRemoteMetadataNext(name: string, options: ISyncUplinksOptions): Promise<[Manifest, string]>;
+}
+
+export interface ISyncUplinksOptions extends Options {
+  uplinksLook?: boolean;
+  etag?: string;
 }
 
 /**
@@ -439,42 +447,58 @@ class ProxyStorage implements IProxy {
     }
   }
 
-  public async getRemoteMetadataNext(name: string, options: any): Promise<[Manifest, string]> {
+  public async getRemoteMetadataNext(
+    name: string,
+    options: ISyncUplinksOptions
+  ): Promise<[Manifest, string]> {
     const headers = {};
+    debug('get metadata for %s', name);
     if (_.isNil(options.etag) === false) {
-      headers['If-None-Match'] = options.etag;
+      headers[HEADERS.NONE_MATCH] = options.etag;
       headers[HEADERS.ACCEPT] = contentTypeAccept;
     }
     const method = options.method || 'GET';
     const uri = this.config.url + `/${encode(name)}`;
-    const response = await fetchRetry(uri, {
-      headers,
-      method,
-      retryOptions: options.retryOptions,
-      //   retryOnHttpResponse: function (response) {
-      //     if (response.status >= 500) {
-      //       // retry on all 5xx and all 4xx errors
-      //       return true;
-      //     }
-      //   },
-      // },
-    });
-    // console.log('response', response.status);
-    if (response.status === HTTP_STATUS.NOT_FOUND) {
-      throw errorUtils.getNotFound(errorUtils.API_ERROR.NOT_PACKAGE_UPLINK);
-    }
+    debug('request uri for %s', uri);
+    let response;
+    try {
+      response = await got.get(uri, {
+        headers,
+        responseType: 'json',
+        method,
+        retry: options?.retry,
+        timeout: options?.timeout,
+      });
+      const etag = response.headers.etag as string;
+      const data = response.body;
 
-    if (!(response.status >= HTTP_STATUS.OK && response.status < HTTP_STATUS.MULTIPLE_CHOICES)) {
-      const error = errorUtils.getInternalError(
-        `${errorUtils.API_ERROR.BAD_STATUS_CODE}: ${response.status}`
-      );
+      // not modified status (304) registry does not return any payload
+      // it is handled as an error
+      if (response?.statusCode === HTTP_STATUS.NOT_MODIFIED) {
+        throw errorUtils.getCode(HTTP_STATUS.NOT_MODIFIED, API_ERROR.NOT_MODIFIED_NO_DATA);
+      }
 
-      error.remoteStatus = response.status;
-      throw error;
+      debug('uri %s success', uri);
+      return [data, etag];
+    } catch (err: any) {
+      debug('uri %s fail', uri);
+      if (err.code === 'ERR_NON_2XX_3XX_RESPONSE') {
+        const code = err.response.statusCode;
+        if (code === HTTP_STATUS.NOT_FOUND) {
+          throw errorUtils.getNotFound(errorUtils.API_ERROR.NOT_PACKAGE_UPLINK);
+        }
+
+        if (!(code >= HTTP_STATUS.OK && code < HTTP_STATUS.MULTIPLE_CHOICES)) {
+          const error = errorUtils.getInternalError(
+            `${errorUtils.API_ERROR.BAD_STATUS_CODE}: ${code}`
+          );
+          // we need this code to identify outside which status code triggered the error
+          error.remoteStatus = code;
+          throw error;
+        }
+      }
+      throw err;
     }
-    const etag = response.headers.get('etag') as string;
-    const data = await response.json();
-    return [data, etag];
   }
 
   /**

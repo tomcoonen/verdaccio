@@ -67,5 +67,8 @@ export function generatePackageMetadata(
         length: 512,
       },
     },
+    _uplinks: {},
+    _distfiles: {},
+    _rev: '',
   };
 }

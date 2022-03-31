@@ -85,24 +85,50 @@ describe('proxy', () => {
     });
 
     describe('error handling', () => {
+      test('proxy call with 304', async () => {
+        nock(domain).get('/jquery').reply(304);
+        const prox1 = new ProxyStorage(defaultRequestOptions, conf);
+        await expect(prox1.getRemoteMetadataNext('jquery', { etag: 'rev_3333' })).rejects.toThrow(
+          'foo'
+        );
+      });
+
       test('reply with 500 error', async () => {
         nock(domain).get('/jquery').replyWithError('something awful happened');
         const prox1 = new ProxyStorage(defaultRequestOptions, conf);
-        await expect(
-          prox1.getRemoteMetadataNext('jquery', { retryOptions: false })
-        ).rejects.toThrow(
-          new Error(
-            'request to https://registry.npmjs.org/jquery failed, reason: something awful happened'
-          )
+        await expect(prox1.getRemoteMetadataNext('jquery', { retry: 0 })).rejects.toThrow(
+          new Error('something awful happened')
         );
       });
 
       test('reply with 409 error', async () => {
         nock(domain).get('/jquery').reply(409);
         const prox1 = new ProxyStorage(defaultRequestOptions, conf);
-        await expect(
-          prox1.getRemoteMetadataNext('jquery', { retryOptions: false })
-        ).rejects.toThrow(new Error('bad status code: 409'));
+        await expect(prox1.getRemoteMetadataNext('jquery', { retry: 0 })).rejects.toThrow(
+          new Error('bad status code: 409')
+        );
+      });
+
+      test('reply with bad body json format', async () => {
+        nock(domain).get('/jquery').reply(200, 'some-text');
+        const prox1 = new ProxyStorage(defaultRequestOptions, conf);
+        await expect(prox1.getRemoteMetadataNext('jquery', { retry: 0 })).rejects.toThrow(
+          new Error(
+            'Unexpected token s in JSON at position 0 in "https://registry.npmjs.org/jquery"'
+          )
+        );
+      });
+    });
+
+    describe('retry', () => {
+      test('retry 500 error response with 200', async () => {
+        nock(domain).get('/jquery').reply(200, 'some-text');
+        const prox1 = new ProxyStorage(defaultRequestOptions, conf);
+        await expect(prox1.getRemoteMetadataNext('jquery', { retry: 0 })).rejects.toThrow(
+          new Error(
+            'Unexpected token s in JSON at position 0 in "https://registry.npmjs.org/jquery"'
+          )
+        );
       });
     });
   });

@@ -42,7 +42,9 @@ export function getLatest(pkg: Package): string {
   * @param {*} local
   * @param {*} upstream
   * @param {*} config sds
+  * @deprecated
   */
+// @deprecated
 export function mergeVersions(local: Package, upstream: Package) {
   // copy new versions to a cache
   // NOTE: if a certain version was updated, we can't refresh it reliably

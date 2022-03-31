@@ -42,6 +42,7 @@ export const HEADERS = {
   CSP: 'Content-Security-Policy',
   CTO: 'X-Content-Type-Options',
   XSS: 'X-XSS-Protection',
+  NONE_MATCH: 'If-None-Match',
   ETAG: 'ETag',
   JSON_CHARSET: 'application/json; charset=utf-8',
   OCTET_STREAM: 'application/octet-stream; charset=utf-8',
