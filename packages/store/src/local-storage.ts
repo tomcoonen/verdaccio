@@ -38,8 +38,8 @@ import {
   generateRevision,
   getLatestReadme,
   normalizePackage,
-  tagVersion,
 } from './storage-utils';
+import { tagVersion } from './versions-utils';
 
 const debug = buildDebug('verdaccio:storage:local');
 
@@ -1077,6 +1077,10 @@ class LocalStorage {
   private _createNewPackage(name: string, callback: Callback): Callback {
     return callback(null, normalizePackage(generatePackageTemplate(name)));
   }
+
+  // private _createNewPackageNext(name: string): Callback {
+  //   return normalizePackage(generatePackageTemplate(name));
+  // }
 
   /**
    * Handle internal error

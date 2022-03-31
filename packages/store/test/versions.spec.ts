@@ -1,9 +1,8 @@
-import { DIST_TAGS } from '@verdaccio/core';
-import { Package } from '@verdaccio/types';
+import assert from 'assert';
 
-import { getVersion, normalizeDistTags, sortVersionsAndFilterInvalid } from '../src/index';
+import { getVersion, sortVersionsAndFilterInvalid, tagVersion } from '../src/index';
 
-describe('Utilities', () => {
+describe('versions-utils', () => {
   const dist = (version) => ({
     tarball: `http://registry.org/npm_test/-/npm_test-${version}.tgz`,
     shasum: `sha1-${version}`,
@@ -47,7 +46,7 @@ describe('Utilities', () => {
     });
   });
 
-  describe('semverSort', () => {
+  describe('sortVersionsAndFilterInvalid', () => {
     test('should sort versions', () => {
       expect(sortVersionsAndFilterInvalid(['1.0.0', '5.0.0', '2.0.0'])).toEqual([
         '1.0.0',
@@ -64,62 +63,47 @@ describe('Utilities', () => {
     });
   });
 
-  describe('normalizeDistTags', () => {
-    const metadata = {
-      name: 'npm_test',
-      versions: {
-        '1.0.0': { dist: dist('1.0.0') },
-        '1.0.1': { dist: dist('1.0.1') },
-        '0.2.1-1': { dist: dist('0.2.1-1') },
-        '0.2.1-alpha': { dist: dist('0.2.1-alpha') },
-        '0.2.1-alpha.0': { dist: dist('0.2.1-alpha.0') },
-      },
-    };
-    const cloneMetadata: Package | any = (pkg = metadata) => Object.assign({}, pkg);
+  describe('tagVersion', () => {
+    test('add new one', () => {
+      let pkg = {
+        versions: {},
+        'dist-tags': {},
+      };
 
-    describe('tag as arrays [deprecated]', () => {
-      test('should convert any array of dist-tags to a plain string', () => {
-        const pkg = cloneMetadata();
-        pkg[DIST_TAGS] = {
-          latest: ['1.0.1'],
-        };
-
-        expect(normalizeDistTags(pkg)[DIST_TAGS]).toEqual({ latest: '1.0.1' });
-      });
-
-      test('should convert any empty array to empty list of dist-tags', () => {
-        const pkg = cloneMetadata();
-        pkg[DIST_TAGS] = {
-          latest: [],
-        };
-
-        expect(normalizeDistTags(pkg)[DIST_TAGS]).toEqual({});
+      // @ts-ignore
+      assert(tagVersion(pkg, '1.1.1', 'foo', {}));
+      assert.deepEqual(pkg, {
+        versions: {},
+        'dist-tags': { foo: '1.1.1' },
       });
     });
 
-    test('should clean up a invalid latest version', () => {
-      const pkg = cloneMetadata();
-      pkg[DIST_TAGS] = {
-        latest: '20000',
+    test('add (compat)', () => {
+      const x = {
+        versions: {},
+        'dist-tags': { foo: '1.1.0' },
       };
 
-      expect(Object.keys(normalizeDistTags(pkg)[DIST_TAGS])).toHaveLength(0);
+      // @ts-ignore
+      assert(tagVersion(x, '1.1.1', 'foo'));
+      assert.deepEqual(x, {
+        versions: {},
+        'dist-tags': { foo: '1.1.1' },
+      });
     });
 
-    test('should handle empty dis-tags and define last published version as latest', () => {
-      const pkg = cloneMetadata();
-      pkg[DIST_TAGS] = {};
-
-      expect(normalizeDistTags(pkg)[DIST_TAGS]).toEqual({ latest: '1.0.1' });
-    });
-
-    test('should define last published version as latest with a custom dist-tag', () => {
-      const pkg = cloneMetadata();
-      pkg[DIST_TAGS] = {
-        beta: '1.0.1',
+    test('add fresh tag', () => {
+      let x = {
+        versions: {},
+        'dist-tags': { foo: '1.1.0' },
       };
 
-      expect(normalizeDistTags(pkg)[DIST_TAGS]).toEqual({ beta: '1.0.1', latest: '1.0.1' });
+      // @ts-ignore
+      assert(tagVersion(x, '1.1.1', 'foo'));
+      assert.deepEqual(x, {
+        versions: {},
+        'dist-tags': { foo: '1.1.1' },
+      });
     });
   });
 });

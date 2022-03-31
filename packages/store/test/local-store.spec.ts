@@ -1,12 +1,12 @@
 import path from 'path';
 import rimRaf from 'rimraf';
-import { dirSync } from 'tmp-promise';
 
 import { Config as AppConfig } from '@verdaccio/config';
 import { API_ERROR, DIST_TAGS, HTTP_STATUS } from '@verdaccio/core';
 import { VerdaccioError } from '@verdaccio/core';
 import { logger, setup } from '@verdaccio/logger';
 import { configExample, generateNewVersion } from '@verdaccio/mock';
+import { createTempFolder } from '@verdaccio/test-helper';
 import { Config, MergeTags, Package } from '@verdaccio/types';
 
 import { LocalStorage, PROTO_NAME } from '../src/local-storage';
@@ -27,7 +27,7 @@ describe('LocalStorage', () => {
   const getStorage = (tmpFolder, LocalStorageClass = LocalStorage) => {
     const config: Config = new AppConfig(
       configExample({
-        config_path: path.join(tmpFolder.name, 'storage'),
+        config_path: path.join(tmpFolder, 'storage'),
       })
     );
 
@@ -97,12 +97,12 @@ describe('LocalStorage', () => {
 
   beforeEach(async () => {
     // FIXME: remove tmp folder on afterEach
-    tmpFolder = dirSync({ unsafeCleanup: true });
+    tmpFolder = createTempFolder('foo');
     storage = getStorage(tmpFolder);
     await storage.init();
   });
 
-  describe('LocalStorage::preparePackage', () => {
+  describe('LocalStorage', () => {
     test('should add a package', (done) => {
       const metadata = JSON.parse(readMetadata().toString());
       // @ts-ignore
@@ -303,7 +303,7 @@ describe('LocalStorage', () => {
       const version = '1.0.2';
       let _storage;
       beforeEach(async () => {
-        const tmpFolder = dirSync({ unsafeCleanup: true });
+        const tmpFolder = createTempFolder('updateVersions');
         class MockLocalStorage extends LocalStorage {}
         // @ts-ignore
         MockLocalStorage.prototype._writePackage = jest.fn(LocalStorage.prototype._writePackage);

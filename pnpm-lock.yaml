@@ -1033,7 +1033,6 @@ importers:
       nock: 13.2.2
       node-mocks-http: 1.11.0
       semver: 7.3.5
-      tmp-promise: 3.0.3
       undici: 4.15.0
     dependencies:
       '@verdaccio/config': link:../config
@@ -1058,7 +1057,6 @@ importers:
       '@verdaccio/types': link:../core/types
       nock: 13.2.2
       node-mocks-http: 1.11.0
-      tmp-promise: 3.0.3
       undici: 4.15.0
 
   packages/tools/benchmark:

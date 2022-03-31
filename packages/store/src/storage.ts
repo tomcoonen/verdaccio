@@ -38,7 +38,6 @@ import {
   Version,
   Versions,
 } from '@verdaccio/types';
-import { getVersion, normalizeDistTags } from '@verdaccio/utils';
 
 import { LocalStorage } from './local-storage';
 import { SearchManager } from './search';
@@ -51,6 +50,7 @@ import {
   mergeUplinkTimeIntoLocal,
   mergeUplinkTimeIntoLocalNext,
   mergeVersions,
+  normalizeDistTags,
   publishPackage,
   updateUpLinkMetadata,
 } from './storage-utils';
@@ -61,6 +61,7 @@ import {
   updateVersionsHiddenUpLink,
   updateVersionsHiddenUpLinkNext,
 } from './uplink-util';
+import { getVersion } from './versions-utils';
 
 const debug = buildDebug('verdaccio:storage');
 class Storage {
