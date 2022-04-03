@@ -89,7 +89,7 @@ describe('proxy', () => {
         nock(domain).get('/jquery').reply(304);
         const prox1 = new ProxyStorage(defaultRequestOptions, conf);
         await expect(prox1.getRemoteMetadataNext('jquery', { etag: 'rev_3333' })).rejects.toThrow(
-          'foo'
+          'no data'
         );
       });
 

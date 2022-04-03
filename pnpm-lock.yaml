@@ -8273,7 +8273,7 @@ packages:
       chalk: 4.1.2
       collect-v8-coverage: 1.0.1
       exit: 0.1.2
-      glob: 7.1.7
+      glob: 7.2.0
       graceful-fs: 4.2.6
       istanbul-lib-coverage: 3.2.0
       istanbul-lib-instrument: 5.1.0
@@ -16159,6 +16159,7 @@ packages:
       minimatch: 3.1.2
       once: 1.4.0
       path-is-absolute: 1.0.1
+    dev: true
 
   /glob/7.2.0:
     resolution: {integrity: sha512-lmLf6gtyrPq8tTjSmrO94wBeQbFR3HbLHbuyD69wuyQkImp2hWqMGB47OX65FBkPffO641IP9jWa1z4ivqG26Q==}
@@ -17051,7 +17052,7 @@ packages:
   /ignore-walk/3.0.4:
     resolution: {integrity: sha512-PY6Ii8o1jMRA1z4F2hRkH/xN59ox43DavKvD3oDpfurRlOJyAHpifIwpbdv1n4jt4ov0jSpw3kQ4GhJnpBL6WQ==}
     dependencies:
-      minimatch: 3.0.4
+      minimatch: 3.1.2
     dev: true
 
   /ignore/5.1.8:
@@ -17819,7 +17820,7 @@ packages:
       chalk: 4.1.2
       ci-info: 3.2.0
       deepmerge: 4.2.2
-      glob: 7.1.7
+      glob: 7.2.0
       graceful-fs: 4.2.6
       jest-circus: 27.4.6
       jest-environment-jsdom: 27.4.6
@@ -18110,7 +18111,7 @@ packages:
       cjs-module-lexer: 1.2.1
       collect-v8-coverage: 1.0.1
       execa: 5.1.1
-      glob: 7.1.7
+      glob: 7.2.0
       graceful-fs: 4.2.6
       jest-haste-map: 27.4.6
       jest-message-util: 27.4.6
@@ -24035,7 +24036,7 @@ packages:
     engines: {node: '>=4'}
     hasBin: true
     dependencies:
-      glob: 7.1.7
+      glob: 7.2.0
       interpret: 1.4.0
       rechoir: 0.6.2
 
@@ -25220,8 +25221,8 @@ packages:
     engines: {node: '>=8'}
     dependencies:
       '@istanbuljs/schema': 0.1.3
-      glob: 7.1.7
-      minimatch: 3.0.4
+      glob: 7.2.0
+      minimatch: 3.1.2
     dev: true
 
   /text-table/0.2.0:
