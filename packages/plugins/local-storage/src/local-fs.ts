@@ -11,6 +11,7 @@ import { Callback, ILocalPackageManager, IUploadTarball, Logger, Package } from 
 
 import {
   mkdirPromise,
+  openPromise,
   readFilePromise,
   renamePromise,
   rmdirPromise,
@@ -22,6 +23,8 @@ export const fileExist = 'EEXISTS';
 export const noSuchFile = 'ENOENT';
 export const resourceNotAvailable = 'EAGAIN';
 export const packageJSONFileName = 'package.json';
+
+export type ILocalFSPackageManager = ILocalPackageManager & { path: string };
 
 const debug = buildDebug('verdaccio:plugin:local-storage:local-fs');
 
@@ -38,6 +41,7 @@ const tempFile = function (str): string {
   return `${str}.tmp${String(Math.random()).slice(2)}`;
 };
 
+// @deprecated use renameTmpNext
 const renameTmp = function (src, dst, _cb): void {
   const cb = (err): void => {
     if (err) {
@@ -66,17 +70,21 @@ export async function renameTmpNext(src: string, dst: string): Promise<void> {
     await renamePromise(src, dst);
     await unlinkPromise(src);
   } else {
-    // TODO: review if this still the cases
+    // FUTURE: find a better wat to handle this scenario
     // windows can't remove opened file,
     // but it seem to be able to rename it
     const tmp = tempFile(dst);
-    await renamePromise(dst, tmp);
-    await renamePromise(src, dst);
-    await unlinkPromise(tmp);
+    try {
+      // this is intended to fail
+      await renamePromise(dst, tmp);
+      // we clean the fake temp folder
+      await unlinkPromise(tmp);
+    } catch (err: any) {
+      // this is only for windows, should be able to rename the file at this point
+      await renamePromise(src, dst);
+    }
   }
 }
-
-export type ILocalFSPackageManager = ILocalPackageManager & { path: string };
 
 export default class LocalFS implements ILocalFSPackageManager {
   public path: string;
@@ -101,6 +109,7 @@ export default class LocalFS implements ILocalFSPackageManager {
     * @param {*} onWrite
     * @param {*} transformPackage
     * @param {*} onEnd
+    * @deprected use updatePackageNext
     */
   public updatePackage(
     name: string,
@@ -239,12 +248,23 @@ export default class LocalFS implements ILocalFSPackageManager {
     await rmdirPromise(this._getStorage('.'));
   }
 
-  public createPackage(name: string, value: Package, cb: Callback): void {
+  // @deprecated use createPackagNext
+  public createPackage(name: string, manifest: Package, cb: Callback): void {
     debug('create a package %o', name);
 
-    this._createFile(this._getStorage(packageJSONFileName), this._convertToString(value), cb);
+    this._createFile(this._getStorage(packageJSONFileName), this._convertToString(manifest), cb);
   }
 
+  public async createPackagNext(name: string, manifest: Package): Promise<void> {
+    debug('create a package %o', name);
+
+    await this.createFileNext(
+      this._getStorage(packageJSONFileName),
+      this._convertToString(manifest)
+    );
+  }
+
+  // @deprecated use savePackageNext
   public savePackage(name: string, value: Package, cb: Callback): void {
     debug('save a package %o', name);
 
@@ -402,6 +422,13 @@ export default class LocalFS implements ILocalFSPackageManager {
     return readTarballStream;
   }
 
+  /**
+   * Create a file.
+   * @param name
+   * @param contents
+   * @param callback
+   * @deprecated use createFileNext instead
+   */
   private _createFile(name: string, contents: any, callback: Function): void {
     debug(' create a new file: %o', name);
 
@@ -416,6 +443,26 @@ export default class LocalFS implements ILocalFSPackageManager {
 
       this._writeFile(name, contents, callback);
     });
+  }
+
+  /**
+   * Create a new file and it´s folder if does not exist previously
+   * @param name the name of the file
+   * @param contents the content of the file
+   */
+  private async createFileNext(name: string, contents: string): Promise<void> {
+    debug(' create a new file: %o', name);
+    try {
+      // https://nodejs.org/dist/latest-v17.x/docs/api/fs.html#file-system-flags
+      // 'wx': Like 'w' but fails if the path exists
+      await openPromise(name, 'wx');
+    } catch (err: any) {
+      if (err.code === 'EEXIST') {
+        debug('file %o cannot be created, it already exists: %o', name);
+        throw fSError(fileExist);
+      }
+    }
+    await this.writeFileNext(name, contents);
   }
 
   private async _readStorageFile(name: string): Promise<any> {
@@ -439,6 +486,7 @@ export default class LocalFS implements ILocalFSPackageManager {
     return storagePath;
   }
 
+  // @deprecated use writeFileNext
   private _writeFile(dest: string, data: string, cb: Callback): void {
     const createTempFile = (cb): void => {
       const tempFilePath = tempFile(dest);
@@ -471,7 +519,8 @@ export default class LocalFS implements ILocalFSPackageManager {
   private async writeTempFileAndRename(dest: string, fileContent: string): Promise<any> {
     const tempFilePath = tempFile(dest);
     try {
-      // write file on temp location
+      // write file on temp locatio
+      // TODO: we need to handle when directory does not exist
       await writeFilePromise(tempFilePath, fileContent);
       debug('creating a new file:: %o', dest);
       // rename tmp file to original
@@ -485,13 +534,19 @@ export default class LocalFS implements ILocalFSPackageManager {
   private async writeFileNext(destiny: string, fileContent: string): Promise<void> {
     try {
       await this.writeTempFileAndRename(destiny, fileContent);
+      debug('write file success %s', destiny);
     } catch (err: any) {
       if (err && err.code === noSuchFile) {
+        const dir = path.dirname(destiny);
         // if fails, we create the folder for the package
-        await mkdirPromise(path.dirname(destiny), { recursive: true });
+        debug('write file has failed, creating folder %s', dir);
+        await mkdirPromise(dir, { recursive: true });
         // we try again create the temp file
+        debug('writing a temp file %s', destiny);
         await this.writeTempFileAndRename(destiny, fileContent);
+        debug('write file success %s', destiny);
       } else {
+        this.logger.error({ err: err.message }, 'error on write file @{err}');
         throw err;
       }
     }

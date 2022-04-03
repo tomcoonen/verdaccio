@@ -130,7 +130,7 @@ describe('storage', () => {
       const storage = new Storage(config);
       await storage.init(config);
 
-      const response = await storage.syncUplinksMetadataNext(fooManifest.name, fooManifest);
+      const [response] = await storage.syncUplinksMetadataNext(fooManifest.name, fooManifest);
       expect(response.name).toEqual(fooManifest.name);
       expect(response[DIST_TAGS].latest).toEqual('8.0.0');
     });
@@ -150,7 +150,7 @@ describe('storage', () => {
       const storage = new Storage(config);
       await storage.init(config);
 
-      const response = await storage.syncUplinksMetadataNext(fooManifest.name, fooManifest);
+      const [response] = await storage.syncUplinksMetadataNext(fooManifest.name, fooManifest);
       expect(response.name).toEqual(fooManifest.name);
       expect(response[DIST_TAGS].latest).toEqual('8.0.0');
     });
@@ -170,7 +170,7 @@ describe('storage', () => {
       const storage = new Storage(config);
       await storage.init(config);
 
-      const response = await storage.syncUplinksMetadataNext(fooManifest.name, fooManifest, {
+      const [response] = await storage.syncUplinksMetadataNext(fooManifest.name, fooManifest, {
         uplinksLook: false,
       });
       expect(response.name).toEqual(fooManifest.name);
@@ -192,7 +192,7 @@ describe('storage', () => {
       await storage.init(config);
 
       // @ts-expect-error
-      const response = await storage.syncUplinksMetadataNext(fooManifest.name, {});
+      const [response] = await storage.syncUplinksMetadataNext(fooManifest.name, {});
       expect(response.name).toEqual(fooManifest.name);
       // the latest from the remote manifest
       expect(response[DIST_TAGS].latest).toEqual('0.0.7');

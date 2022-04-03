@@ -12,9 +12,8 @@ import {
   pkgUtils,
   validatioUtils,
 } from '@verdaccio/core';
-import { logger } from '@verdaccio/logger';
 import { ProxyStorage } from '@verdaccio/proxy';
-import { IProxy, ISyncUplinksOptions, ProxyList } from '@verdaccio/proxy';
+import { IProxy, ISyncUplinksOptions } from '@verdaccio/proxy';
 import { ReadTarball } from '@verdaccio/streams';
 import {
   convertDistRemoteToLocalTarballUrls,
@@ -28,19 +27,14 @@ import {
   GenericBody,
   IReadTarball,
   IUploadTarball,
-  Logger,
   Manifest,
-  MergeTags,
   Package,
   StringValue,
-  Token,
-  TokenFilter,
   Version,
-  Versions,
 } from '@verdaccio/types';
 
+import AbstractStorage from './abstract-storage';
 import { LocalStorage } from './local-storage';
-import { SearchManager } from './search';
 // import { isPublishablePackage, validateInputs } from './star-utils';
 import {
   checkPackageLocal,
@@ -54,49 +48,16 @@ import {
   publishPackage,
   updateUpLinkMetadata,
 } from './storage-utils';
-import { IGetPackageOptions, IGetPackageOptionsNext, IPluginFilters, ISyncUplinks } from './type';
+import { IGetPackageOptions, IGetPackageOptionsNext, ISyncUplinks } from './type';
 // import { StarBody, Users } from './type';
-import {
-  setupUpLinks,
-  updateVersionsHiddenUpLink,
-  updateVersionsHiddenUpLinkNext,
-} from './uplink-util';
+import { updateVersionsHiddenUpLink, updateVersionsHiddenUpLinkNext } from './uplink-util';
 import { getVersion } from './versions-utils';
 
 const debug = buildDebug('verdaccio:storage');
-class Storage {
-  public localStorage: LocalStorage;
-  public searchManager: SearchManager | null;
-  public readonly config: Config;
-  public readonly logger: Logger;
-  public readonly uplinks: ProxyList;
-  public filters: IPluginFilters;
-
+class Storage extends AbstractStorage {
   public constructor(config: Config) {
-    this.config = config;
-    this.uplinks = setupUpLinks(config);
+    super(config);
     debug('uplinks available %o', Object.keys(this.uplinks));
-    this.logger = logger.child({ module: 'storage' });
-    this.filters = [];
-    // @ts-ignore
-    this.localStorage = null;
-    this.searchManager = null;
-  }
-
-  public async init(config: Config, filters: IPluginFilters = []): Promise<void> {
-    if (this.localStorage === null) {
-      this.filters = filters || [];
-      debug('filters available %o', filters);
-      this.localStorage = new LocalStorage(this.config, logger);
-      await this.localStorage.init();
-      debug('local init storage initialized');
-      await this.localStorage.getSecret(config);
-      debug('local storage secret initialized');
-      this.searchManager = new SearchManager(this.uplinks, this.localStorage);
-    } else {
-      debug('storage has been already initialized');
-    }
-    return;
   }
 
   /**
@@ -152,29 +113,10 @@ class Storage {
     }
   }
 
-  private _isAllowPublishOffline(): boolean {
-    return (
-      typeof this.config.publish !== 'undefined' &&
-      _.isBoolean(this.config.publish.allow_offline) &&
-      this.config.publish.allow_offline
-    );
-  }
-
-  public readTokens(filter: TokenFilter): Promise<Token[]> {
-    return this.localStorage.readTokens(filter);
-  }
-
-  public saveToken(token: Token): Promise<void> {
-    return this.localStorage.saveToken(token);
-  }
-
-  public deleteToken(user: string, tokenKey: string): Promise<any> {
-    return this.localStorage.deleteToken(user, tokenKey);
-  }
-
   /**
    * Add a new version of package {name} to a system
    Used storages: local (write)
+   @deprecated use addVersionNext
    */
   public addVersion(
     name: string,
@@ -195,15 +137,6 @@ class Storage {
   ): Promise<void> {
     debug('add the version %o for package %o', version, name);
     return this.localStorage.addVersionNext(name, version, metadata, tag);
-  }
-
-  /**
-   * Tags a package version with a provided tag
-   Used storages: local (write)
-   */
-  public mergeTags(name: string, tagHash: MergeTags, callback: CallbackAction): void {
-    debug('merge tags for package %o tags %o', name, tagHash);
-    this.localStorage.mergeTags(name, tagHash, callback);
   }
 
   /**
@@ -695,11 +628,35 @@ class Storage {
     }
   }
 
+  /**
+   * Function fetches package metadata from uplinks and synchronizes it with local data
+     if package is available locally, it MUST be provided in pkginfo.
+     
+    Using this example: 
+
+    "jquery":
+      access: $all
+      publish: $authenticated
+      unpublish: $authenticated
+      # two uplinks setup
+      proxy: ver npmjs  
+      # one uplink setup
+      proxy: npmjs    
+
+    A package requires uplinks syncronization if enables the proxy section, uplinks
+    can be more than one, the more are the most slow request will take, the request
+    are made in serie and if 1st call fails, the secon will be triggered, otherwise
+    the 1st will reply and others will be discareded. The order is important.
+
+    Errors on upkinks are considered are, time outs, connection fails and http status 304, 
+    in that case the request returns empty body and we want ask next on the list if has fresh 
+    updates. 
+   */
   public async syncUplinksMetadataNext(
     name: string,
     packageInfo: Manifest,
     options: ISyncUplinksOptions = {}
-  ): Promise<Manifest> {
+  ): Promise<[Manifest, any]> {
     let found = false;
     let syncManifest = {} as Manifest;
     const upLinks: Promise<Manifest>[] = [];
@@ -719,7 +676,7 @@ class Storage {
     }
 
     if (upLinks.length === 0) {
-      return syncManifest;
+      return [syncManifest, []];
     }
 
     const errors: any[] = [];
@@ -731,11 +688,14 @@ class Storage {
         break;
       } catch (err: any) {
         errors.push(err);
+        // enforce use next uplink on the list
         continue;
       }
     }
     if (found) {
-      return syncManifest;
+      let updatedCacheManifest = await this.localStorage.updateVersionsNext(name, syncManifest);
+      const [filteredManifest, filtersErrors] = await this.applyFilters(updatedCacheManifest);
+      return [{ ...updatedCacheManifest, ...filteredManifest }, [...errors, ...filtersErrors]];
     } else {
       // console.log('errors', errors);
       debug('uplinks sync failed with %o errors', errors.length);
@@ -790,8 +750,9 @@ class Storage {
         );
         throw err;
       }
-
+      // updates the _uplink metadata fields, cache, etc
       _cacheManifest = updateUpLinkMetadata(uplink.upname, _cacheManifest, etag);
+      // merge time field cache and remote
       _cacheManifest = mergeUplinkTimeIntoLocalNext(_cacheManifest, remoteManifest);
       _cacheManifest = updateVersionsHiddenUpLinkNext(cachedManifest, uplink);
       try {
@@ -816,6 +777,7 @@ class Storage {
    * Function fetches package metadata from uplinks and synchronizes it with local data
    if package is available locally, it MUST be provided in pkginfo
    returns callback(err, result, uplink_errors)
+   @deprecated use syncUplinksMetadataNext
    */
   public _syncUplinksMetadata(
     name: string,
@@ -967,24 +929,6 @@ class Storage {
         );
       }
     );
-  }
-
-  /**
-   * Set a hidden value for each version.
-   * @param {Array} versions list of version
-   * @param {String} upLink uplink name
-   * @private
-   */
-  public _updateVersionsHiddenUpLink(versions: Versions, upLink: IProxy): void {
-    for (const i in versions) {
-      if (Object.prototype.hasOwnProperty.call(versions, i)) {
-        const version = versions[i];
-
-        // holds a "hidden" value to be used by the package storage.
-        // $FlowFixMe
-        version[Symbol.for('__verdaccio_uplink')] = upLink.upname;
-      }
-    }
   }
 }
 

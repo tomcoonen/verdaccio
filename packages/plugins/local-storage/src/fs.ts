@@ -8,6 +8,7 @@ const statPromise = fs.stat;
 const unlinkPromise = fs.unlink;
 const rmdirPromise = fs.rmdir;
 const renamePromise = fs.rename;
+const openPromise = fs.open;
 
 export const readFilePromise = async (path) => {
   return await readFile(path, 'utf8');
@@ -21,4 +22,5 @@ export {
   statPromise,
   unlinkPromise,
   rmdirPromise,
+  openPromise,
 };

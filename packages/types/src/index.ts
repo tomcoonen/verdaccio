@@ -1,5 +1,4 @@
 import { NextFunction, Request, Response } from 'express';
-import lunrMutable from 'lunr-mutable-indexes';
 
 import {
   Author,
@@ -18,8 +17,6 @@ import {
   Token,
   TokenFilter,
   UpLinkConf,
-  Version,
-  Versions,
   StringValue as verdaccio$StringValue,
 } from '@verdaccio/types';
 
@@ -88,22 +85,11 @@ export type $ResponseExtend = Response & { cookies?: any };
 export type $NextFunctionVer = NextFunction & any;
 export type $SidebarPackage = Package & { latest: any };
 
-export interface IWebSearch {
-  index: lunrMutable.index;
-  storage: Storage;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  query(query: string): any;
-  add(pkg: Version): void;
-  remove(name: string): void;
-  reindex(): void;
-  configureStorage(storage: Storage): void;
-}
-
 // FIXME: This prop should be on @verdaccio/types
 export type UpLinkConfLocal = UpLinkConf & {
   no_proxy?: string;
 };
-
+// @deprecated use @verdaccio/proxy
 export interface IProxy {
   config: UpLinkConfLocal;
   failed_requests: number;
@@ -136,7 +122,7 @@ export interface IGetPackageOptions {
   uplinksLook: boolean;
   req: any;
 }
-
+// @deprecated use @verdaccio/proxy
 export interface ISyncUplinks {
   uplinksLook?: boolean;
   etag?: string;
@@ -145,6 +131,7 @@ export interface ISyncUplinks {
 
 export type IPluginFilters = IPluginStorageFilter<Config>[];
 
+// @deprecated use @verdaccio/storage
 export interface Storage extends IStorageManager<Config>, ITokenActions {
   config: Config;
   localStorage: IStorage | null;
@@ -155,7 +142,6 @@ export interface Storage extends IStorageManager<Config>, ITokenActions {
   deleteToken(user: string, tokenKey: string): Promise<any>;
   readTokens(filter: TokenFilter): Promise<Token[]>;
   _syncUplinksMetadata(name: string, packageInfo: Package, options: any, callback: Callback): void;
-  _updateVersionsHiddenUpLink(versions: Versions, upLink: IProxy): void;
 }
 
 /**

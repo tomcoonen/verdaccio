@@ -157,6 +157,7 @@ export function publishPackage(
   });
 }
 
+// TODO: move to abstract storage
 export function checkPackageRemote(
   name: string,
   isAllowPublishOffline: boolean,

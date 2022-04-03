@@ -55,6 +55,7 @@
     "@verdaccio/types": "workspace:11.0.0-6-next.12",
     "@verdaccio/config": "workspace:6.0.0-6-next.14",
     "@verdaccio/utils": "workspace:6.0.0-6-next.11",
+    "@verdaccio/test-helper": "workspace:1.0.0",
     "minimatch": "3.0.4",
     "tmp-promise": "3.0.3"
   },

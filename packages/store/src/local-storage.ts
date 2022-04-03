@@ -2,11 +2,17 @@ import assert from 'assert';
 import buildDebug from 'debug';
 import _ from 'lodash';
 import { PassThrough } from 'stream';
-import UrlNode from 'url';
+import { default as URL } from 'url';
 
 import { errorUtils, pkgUtils, pluginUtils, searchUtils, validatioUtils } from '@verdaccio/core';
-import { API_ERROR, DIST_TAGS, HTTP_STATUS, SUPPORT_ERRORS, USERS } from '@verdaccio/core';
-import { VerdaccioError } from '@verdaccio/core';
+import {
+  API_ERROR,
+  DIST_TAGS,
+  HTTP_STATUS,
+  SUPPORT_ERRORS,
+  USERS,
+  VerdaccioError,
+} from '@verdaccio/core';
 import { loadPlugin } from '@verdaccio/loaders';
 import LocalDatabase from '@verdaccio/local-storage';
 import { ReadTarball, UploadTarball } from '@verdaccio/streams';
@@ -20,6 +26,7 @@ import {
   IReadTarball,
   IUploadTarball,
   Logger,
+  Manifest,
   MergeTags,
   Package,
   StorageUpdateCallback,
@@ -188,11 +195,102 @@ class LocalStorage {
   }
 
   /**
+    Updates the local cache with the merge from the remote/client manifest.
+    @param name
+    @param remoteManifest
+    @returns return a merged manifest.
+  */
+  public async updateVersionsNext(name: string, remoteManifest: Manifest): Promise<Manifest> {
+    debug(`updating versions for package %o`, name);
+    let cacheManifest: Manifest = await this.readCreatePackageNext(name);
+    let change = false;
+    // updating readme
+    cacheManifest.readme = getLatestReadme(remoteManifest);
+    if (remoteManifest.readme !== cacheManifest.readme) {
+      change = true;
+    }
+
+    debug('update versions');
+    for (const versionId in remoteManifest.versions) {
+      if (_.isNil(cacheManifest.versions[versionId])) {
+        let version = remoteManifest.versions[versionId];
+
+        // we don't keep readme for package versions,
+        // only one readme per package
+        version = cleanUpReadme(version);
+        debug('clean up readme for %o', versionId);
+        version.contributors = normalizeContributors(version.contributors as Author[]);
+
+        change = true;
+        cacheManifest.versions[versionId] = version;
+
+        if (version?.dist?.tarball) {
+          const filename = pkgUtils.extractTarballName(version.dist.tarball);
+
+          // it does NOT overwrite any existing records
+          if (_.isNil(cacheManifest?._distfiles[filename])) {
+            const hash: DistFile = (cacheManifest._distfiles[filename] = {
+              url: version.dist.tarball,
+              sha: version.dist.shasum,
+            });
+            const upLink: string = version[Symbol.for('__verdaccio_uplink')];
+            if (_.isNil(upLink) === false) {
+              this._updateUplinkToRemoteProtocol(hash, upLink);
+            }
+          }
+        }
+      }
+    }
+
+    debug('update dist-tags');
+    for (const tag in remoteManifest[DIST_TAGS]) {
+      if (
+        !cacheManifest[DIST_TAGS][tag] ||
+        cacheManifest[DIST_TAGS][tag] !== remoteManifest[DIST_TAGS][tag]
+      ) {
+        change = true;
+        cacheManifest[DIST_TAGS][tag] = remoteManifest[DIST_TAGS][tag];
+      }
+    }
+
+    for (const up in remoteManifest._uplinks) {
+      if (Object.prototype.hasOwnProperty.call(remoteManifest._uplinks, up)) {
+        const need_change =
+          !isObject(cacheManifest._uplinks[up]) ||
+          remoteManifest._uplinks[up].etag !== cacheManifest._uplinks[up].etag ||
+          remoteManifest._uplinks[up].fetched !== cacheManifest._uplinks[up].fetched;
+
+        if (need_change) {
+          change = true;
+          cacheManifest._uplinks[up] = remoteManifest._uplinks[up];
+        }
+      }
+    }
+
+    debug('update time');
+    if ('time' in remoteManifest && !_.isEqual(cacheManifest.time, remoteManifest.time)) {
+      cacheManifest.time = remoteManifest.time;
+      change = true;
+    }
+
+    if (change) {
+      debug('updating package info %o', name);
+      await this.writePackageNext(name, cacheManifest);
+      return cacheManifest;
+    } else {
+      return cacheManifest;
+    }
+  }
+
+  /**
    * Synchronize remote package info with the local one
    * @param {*} name
    * @param {*} packageInfo
    * @param {*} callback
+   * @deprecated use updateVersionsNext
    */
+
+  // @deprecated use updateVersionsNext
   public updateVersions(name: string, packageInfo: Package, callback: Callback): void {
     debug(`updating versions for package %o`, name);
     this._readCreatePackage(name, (err, packageLocalJson): void => {
@@ -222,7 +320,7 @@ class LocalStorage {
           packageLocalJson.versions[versionId] = version;
 
           if (version?.dist?.tarball) {
-            const urlObject: any = UrlNode.parse(version.dist.tarball);
+            const urlObject: any = URL.parse(version.dist.tarball);
             const filename = urlObject.pathname.replace(/^.*\//, '');
 
             // we do NOT overwrite any existing records
@@ -1052,12 +1150,12 @@ class LocalStorage {
    * @param {*} pkgName
    * @param {*} callback
    * @return {Function}
+   * @deprecated use readCreatePackageNext
    */
   private _readCreatePackage(pkgName: string, callback: Callback): void {
     const storage: any = this._getLocalStorage(pkgName);
     if (_.isNil(storage)) {
-      this._createNewPackage(pkgName, callback);
-      return;
+      return callback(errorUtils.getInternalError('storage could not be found'));
     }
 
     storage.readPackage(pkgName, (err, data): void => {
@@ -1074,13 +1172,38 @@ class LocalStorage {
     });
   }
 
+  /**
+   * Retrieve either a previous created local package or a boilerplate.
+   * @param {*} pkgName
+   * @param {*} callback
+   * @return {Function}
+   */
+  private async readCreatePackageNext(pkgName: string): Promise<Manifest> {
+    const storage: any = this._getLocalStorage(pkgName);
+    if (_.isNil(storage)) {
+      throw errorUtils.getInternalError('storage could not be found');
+    }
+
+    try {
+      const result: Package = await storage.readPackageNext(pkgName);
+      return normalizePackage(result);
+    } catch (err: any) {
+      if (err.code === STORAGE.NO_SUCH_FILE_ERROR || err.code === HTTP_STATUS.NOT_FOUND) {
+        return this._createNewPackageNext(pkgName);
+      } else {
+        throw this._internalError(err, STORAGE.PACKAGE_FILE_NAME, 'error reading');
+      }
+    }
+  }
+
+  // @deprecated
   private _createNewPackage(name: string, callback: Callback): Callback {
     return callback(null, normalizePackage(generatePackageTemplate(name)));
   }
 
-  // private _createNewPackageNext(name: string): Callback {
-  //   return normalizePackage(generatePackageTemplate(name));
-  // }
+  private _createNewPackageNext(name: string): Manifest {
+    return normalizePackage(generatePackageTemplate(name));
+  }
 
   /**
    * Handle internal error
@@ -1159,6 +1282,7 @@ class LocalStorage {
    * @param {*} json
    * @param {*} callback
    * @return {Function}
+   * @deprecated use writePackageNext
    */
   private _writePackage(name: string, json: Package, callback: Callback): void {
     const storage: any = this._getLocalStorage(name);
@@ -1217,20 +1341,45 @@ class LocalStorage {
    * @param {Object} hash metadata
    * @param {String} upLinkKey registry key
    * @private
+   * @deprecated use _updateUplinkToRemoteProtocolNext
    */
   private _updateUplinkToRemoteProtocol(hash: DistFile, upLinkKey: string): void {
     // if we got this information from a known registry,
     // use the same protocol for the tarball
-    //
-    // see https://github.com/rlidwka/sinopia/issues/166
-    const tarballUrl: any = UrlNode.parse(hash.url);
-    const uplinkUrl: any = UrlNode.parse(this.config.uplinks[upLinkKey].url);
+    const tarballUrl: any = URL.parse(hash.url);
+    const uplinkUrl: any = URL.parse(this.config.uplinks[upLinkKey].url);
 
     if (uplinkUrl.host === tarballUrl.host) {
       tarballUrl.protocol = uplinkUrl.protocol;
       hash.registry = upLinkKey;
-      hash.url = UrlNode.format(tarballUrl);
+      hash.url = URL.format(tarballUrl);
     }
+  }
+
+  /**
+   * Ensure the dist file remains as the same protocol
+   *   
+   * "dist": {
+        "shasum": "01757a4c5beea29e8ae697527c3131abbe997a28",
+        "tarball": "[http]s://domain/jquery/-/[jquery-1.6.2.tgz]"
+     },
+   * 
+   * @param {Object} hash metadata
+   * @param {String} upLinkKey registry key
+   * @private
+   */
+  private _updateUplinkToRemoteProtocolNext(hash: DistFile, upLinkKey: string): DistFile {
+    // if we got this information from a known registry,
+    // use the same protocol for the tarball
+    const tarballUrl: any = URL.parse(hash.url);
+    const uplinkUrl: any = URL.parse(this.config.uplinks[upLinkKey].url);
+
+    if (uplinkUrl.host === tarballUrl.host) {
+      tarballUrl.protocol = uplinkUrl.protocol;
+      hash.registry = upLinkKey;
+      hash.url = URL.format(tarballUrl);
+    }
+    return hash;
   }
 
   public async getSecret(config: Config): Promise<void> {

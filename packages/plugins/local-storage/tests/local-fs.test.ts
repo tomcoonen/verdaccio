@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
-import { dirSync } from 'tmp-promise';
 
+import { createTempFolder } from '@verdaccio/test-helper';
 import { ILocalPackageManager, Logger, Package } from '@verdaccio/types';
 
 import LocalDriver, { fSError, fileExist, noSuchFile, resourceNotAvailable } from '../src/local-fs';
@@ -22,9 +22,9 @@ const logger: Logger = {
 
 describe('Local FS test', () => {
   let tmpFolder;
-  beforeAll(() => {
-    tmpFolder = dirSync({ unsafeCleanup: true });
-    localTempStorage = path.join(tmpFolder.name, './_storage');
+  beforeEach(() => {
+    tmpFolder = createTempFolder('local-fs');
+    localTempStorage = path.join(tmpFolder, './_storage');
   });
 
   afterAll(() => {
@@ -94,19 +94,26 @@ describe('Local FS test', () => {
     test('createPackage() fails by fileExist', (done) => {
       const localFs = new LocalDriver(path.join(localTempStorage, 'createPackage'), logger);
 
-      localFs.createPackage(path.join(localTempStorage, 'package5'), pkg, (err) => {
-        expect(err).not.toBeNull();
-        expect(err.code).toBe(fileExist);
-        done();
+      localFs.createPackage(path.join(localTempStorage, 'package5'), pkg, () => {
+        localFs.createPackage(path.join(localTempStorage, 'package5'), pkg, (err) => {
+          expect(err).not.toBeNull();
+          expect(err.code).toBe(fileExist);
+          done();
+        });
       });
     });
 
     describe('deletePackage() group', () => {
-      test('deletePackage()', async () => {
+      test('should delete a package', async () => {
         const localFs = new LocalDriver(path.join(localTempStorage, 'createPackage'), logger);
-
+        await localFs.createPackagNext('createPackage', pkg);
         // verdaccio removes the package.json instead the package name
         await localFs.deletePackage('package.json');
+      });
+      test('should fails on delete a package', async () => {
+        const localFs = new LocalDriver(path.join(localTempStorage, 'createPackage'), logger);
+        // verdaccio removes the package.json instead the package name
+        await expect(localFs.deletePackage('package.json')).rejects.toThrow('ENOENT');
       });
     });
   });
