@@ -28,7 +28,6 @@ import {
   IReadTarball,
   IUploadTarball,
   Manifest,
-  Package,
   StringValue,
   Version,
 } from '@verdaccio/types';
@@ -92,7 +91,7 @@ class Storage extends AbstractStorage {
    If it isn't, we create package locally
    Used storages: local (write) && uplinks
    */
-  public async addPackageNext(name: string, metadata: Package): Promise<Package> {
+  public async addPackageNext(name: string, metadata: Manifest): Promise<Manifest> {
     try {
       debug('add package for %o', name);
       await checkPackageLocal(name, this.localStorage);
@@ -146,7 +145,7 @@ class Storage extends AbstractStorage {
    */
   public changePackage(
     name: string,
-    metadata: Package,
+    metadata: Manifest,
     revision: string,
     callback: Callback
   ): void {
@@ -159,7 +158,11 @@ class Storage extends AbstractStorage {
    Function changes a package info from local storage and all uplinks with write access./
    Used storages: local (write)
    */
-  public async changePackageNext(name: string, metadata: Package, revision: string): Promise<void> {
+  public async changePackageNext(
+    name: string,
+    metadata: Manifest,
+    revision: string
+  ): Promise<void> {
     debug('change existing package for package %o revision %o', name, revision);
     this.localStorage.changePackageNext(name, metadata, revision);
   }
@@ -230,13 +233,13 @@ class Storage extends AbstractStorage {
       const err404 = err;
       localStream.abort();
       localStream = null; // we force for garbage collector
-      self.localStorage.getPackageMetadata(name, (err, info: Package): void => {
+      self.localStorage.getPackageMetadata(name, (err, info: Manifest): void => {
         if (_.isNil(err) && info._distfiles && _.isNil(info._distfiles[filename]) === false) {
           // information about this file exists locally
           serveFile(info._distfiles[filename]);
         } else {
           // we know nothing about this file, trying to get information elsewhere
-          self._syncUplinksMetadata(name, info, {}, (err, info: Package): any => {
+          self._syncUplinksMetadata(name, info, {}, (err, info: Manifest): any => {
             if (_.isNil(err) === false) {
               return readStream.emit('error', err);
             }
@@ -436,7 +439,7 @@ class Storage extends AbstractStorage {
     throw errorUtils.getNotFound(`${API_ERROR.VERSION_NOT_EXIST}: ${queryVersion}`);
   }
 
-  public async getPackageManifest(options: IGetPackageOptionsNext): Promise<Package> {
+  public async getPackageManifest(options: IGetPackageOptionsNext): Promise<Manifest> {
     // convert dist remotes to local bars
     const [manifest] = await this.getPackageNext(options);
     const convertedManifest = convertDistRemoteToLocalTarballUrls(
@@ -453,7 +456,7 @@ class Storage extends AbstractStorage {
    * @param options {Object}
    * @returns A package manifest or specific version
    */
-  public async getPackageByOptions(options: IGetPackageOptionsNext): Promise<Package | Version> {
+  public async getPackageByOptions(options: IGetPackageOptionsNext): Promise<Manifest | Version> {
     // if no version we return the whole manifest
     if (_.isNil(options.version) === false) {
       return this.getPackageByVersion(options);
@@ -462,11 +465,11 @@ class Storage extends AbstractStorage {
     }
   }
 
-  public async getPackageNext(options: IGetPackageOptionsNext): Promise<[Package, any[]]> {
+  public async getPackageNext(options: IGetPackageOptionsNext): Promise<[Manifest, any[]]> {
     const { name } = options;
     debug('get package for %o', name);
     try {
-      let data: Package;
+      let data: Manifest;
       try {
         data = await this.localStorage.getPackageMetadataNext(name);
       } catch (err: any) {
@@ -533,6 +536,7 @@ class Storage extends AbstractStorage {
    * @property {object}  options.req Express `req` object
    * @property {boolean} options.keepUpLinkData keep up link info in package meta, last update, etc.
    * @property {function} options.callback Callback for receive data
+   * @deprecated use await storage.getPackageByOptions
    */
   public getPackage(options: IGetPackageOptions): void {
     const { name } = options;
@@ -549,7 +553,7 @@ class Storage extends AbstractStorage {
         name,
         data,
         { req: options.req, uplinksLook: options.uplinksLook },
-        function getPackageSynUpLinksCallback(err, result: Package, uplinkErrors): void {
+        function getPackageSynUpLinksCallback(err, result: Manifest, uplinkErrors): void {
           if (err) {
             debug('error on sync package for %o with error %o', name, err?.message);
             return options.callback(err);
@@ -582,7 +586,7 @@ class Storage extends AbstractStorage {
           const getPackage = function (itemPkg): void {
             self.localStorage.getPackageMetadata(
               locals[itemPkg],
-              function (err, pkgMetadata: Package): void {
+              function (err, pkgMetadata: Manifest): void {
                 if (_.isNil(err)) {
                   const latest = pkgMetadata[DIST_TAGS].latest;
                   if (latest && pkgMetadata.versions[latest]) {
@@ -697,7 +701,6 @@ class Storage extends AbstractStorage {
       const [filteredManifest, filtersErrors] = await this.applyFilters(updatedCacheManifest);
       return [{ ...updatedCacheManifest, ...filteredManifest }, [...errors, ...filtersErrors]];
     } else {
-      // console.log('errors', errors);
       debug('uplinks sync failed with %o errors', errors.length);
       for (const err of errors) {
         const { code } = err;
@@ -781,7 +784,7 @@ class Storage extends AbstractStorage {
    */
   public _syncUplinksMetadata(
     name: string,
-    packageInfo: Package,
+    packageInfo: Manifest,
     options: ISyncUplinks,
     callback: Callback
   ): void {
@@ -905,7 +908,7 @@ class Storage extends AbstractStorage {
         self.localStorage.updateVersions(
           name,
           packageInfo,
-          async (err, packageJsonLocal: Package): Promise<any> => {
+          async (err, packageJsonLocal: Manifest): Promise<any> => {
             if (err) {
               return callback(err);
             }
