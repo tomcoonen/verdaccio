@@ -133,7 +133,7 @@ describe('proxy', () => {
     });
   });
 
-  describe.skip('getRemoteMetadata', () => {
+  describe('getRemoteMetadata', () => {
     describe('basic requests', () => {
       test('proxy call with etag', (done) => {
         nock(domain)
@@ -200,7 +200,7 @@ describe('proxy', () => {
         });
       });
 
-      test('400 error proxy call', (done) => {
+      test.skip('400 error proxy call', (done) => {
         nock(domain).get('/jquery').reply(409);
         const prox1 = new ProxyStorage(defaultRequestOptions, conf);
         prox1.getRemoteMetadata('jquery', {}, (error) => {

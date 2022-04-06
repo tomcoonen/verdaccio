@@ -1,9 +1,10 @@
 /* global AbortController */
 import JSONStream from 'JSONStream';
 import buildDebug from 'debug';
-import got from 'got';
+import got, { Headers as gotHeaders } from 'got';
 import type { Options } from 'got';
 import _ from 'lodash';
+import ProxyAgent, { ProxyAgentConstructor } from 'proxy-agent';
 import requestDeprecated from 'request';
 import Stream, { PassThrough, Readable } from 'stream';
 import { Headers, fetch as undiciFetch } from 'undici';
@@ -105,9 +106,8 @@ class ProxyStorage implements IProxy {
   // FIXME: upname is assigned to each instance
   // @ts-ignore
   public upname: string;
-  // FIXME: proxy can be boolean or object, something smells here
-  // @ts-ignore
-  public proxy: any;
+  public proxy: string | undefined;
+  private agent: typeof ProxyAgentConstructor | undefined;
   // @ts-ignore
   public last_request_time: number | null;
   public strict_ssl: boolean;
@@ -127,7 +127,9 @@ class ProxyStorage implements IProxy {
 
     this.url = new URL(this.config.url);
     this._setupProxy(this.url.hostname, config, mainConfig, this.url.protocol === 'https:');
-
+    if (typeof this.proxy === 'string') {
+      this.agent = new ProxyAgent(this.proxy);
+    }
     this.config.url = this.config.url.replace(/\/$/, '');
 
     if (this.config.timeout && Number(this.config.timeout) >= 1000) {
@@ -159,6 +161,7 @@ class ProxyStorage implements IProxy {
    * @param {*} options
    * @param {*} cb
    * @return {Request}
+   * @deprecated
    */
   private request(options: any, cb?: Callback): Stream.Readable {
     let json;
@@ -324,6 +327,7 @@ class ProxyStorage implements IProxy {
    * @param {Object} options
    * @return {Object}
    * @private
+   * @deprecated use getHeadersNext
    */
   private _setHeaders(options: any): Headers {
     const headers = options.headers || {};
@@ -339,6 +343,19 @@ class ProxyStorage implements IProxy {
     return this._setAuth(headers);
   }
 
+  private getHeadersNext(headers = {}): gotHeaders {
+    const accept = HEADERS.ACCEPT;
+    const acceptEncoding = HEADERS.ACCEPT_ENCODING;
+    const userAgent = HEADERS.USER_AGENT;
+
+    headers[accept] = headers[accept] || contentTypeAccept;
+    headers[acceptEncoding] = headers[acceptEncoding] || 'gzip';
+    // registry.npmjs.org will only return search result if user-agent include string 'npm'
+    headers[userAgent] = headers[userAgent] || `npm (${this.userAgent})`;
+
+    return this.setAuthNext(headers);
+  }
+
   /**
    * Validate configuration auth and assign Header authorization
    * @param {Object} headers
@@ -346,6 +363,55 @@ class ProxyStorage implements IProxy {
    * @private
    */
   private _setAuth(headers: any): Headers {
+    const { auth } = this.config;
+
+    if (_.isNil(auth) || headers[HEADERS.AUTHORIZATION]) {
+      return headers;
+    }
+
+    if (_.isObject(auth) === false && _.isObject(auth.token) === false) {
+      this._throwErrorAuth('Auth invalid');
+    }
+
+    // get NPM_TOKEN http://blog.npmjs.org/post/118393368555/deploying-with-npm-private-modules
+    // or get other variable export in env
+    // https://github.com/verdaccio/verdaccio/releases/tag/v2.5.0
+    let token: any;
+    const tokenConf: any = auth;
+
+    if (_.isNil(tokenConf.token) === false && _.isString(tokenConf.token)) {
+      token = tokenConf.token;
+    } else if (_.isNil(tokenConf.token_env) === false) {
+      if (_.isString(tokenConf.token_env)) {
+        token = process.env[tokenConf.token_env];
+      } else if (_.isBoolean(tokenConf.token_env) && tokenConf.token_env) {
+        token = process.env.NPM_TOKEN;
+      } else {
+        this.logger.error(constants.ERROR_CODE.token_required);
+        this._throwErrorAuth(constants.ERROR_CODE.token_required);
+      }
+    } else {
+      token = process.env.NPM_TOKEN;
+    }
+
+    if (_.isNil(token)) {
+      this._throwErrorAuth(constants.ERROR_CODE.token_required);
+    }
+
+    // define type Auth allow basic and bearer
+    const type = tokenConf.type || TOKEN_BASIC;
+    this._setHeaderAuthorization(headers, type, token);
+
+    return headers;
+  }
+
+  /**
+   * Validate configuration auth and assign Header authorization
+   * @param {Object} headers
+   * @return {Object}
+   * @private
+   */
+  private setAuthNext(headers: gotHeaders): gotHeaders {
     const { auth } = this.config;
 
     if (_.isNil(auth) || headers[HEADERS.AUTHORIZATION]) {
@@ -451,8 +517,9 @@ class ProxyStorage implements IProxy {
     name: string,
     options: ISyncUplinksOptions
   ): Promise<[Manifest, string]> {
-    const headers = {};
+    // FUTURE: allow mix headers that comes from the client
     debug('get metadata for %s', name);
+    const headers = this.getHeadersNext(options?.headers);
     if (_.isNil(options.etag) === false) {
       headers[HEADERS.NONE_MATCH] = options.etag;
       headers[HEADERS.ACCEPT] = contentTypeAccept;
@@ -462,10 +529,11 @@ class ProxyStorage implements IProxy {
     debug('request uri for %s', uri);
     let response;
     try {
-      response = await got.get(uri, {
+      response = await got(uri, {
         headers,
         responseType: 'json',
         method,
+        agent: this.agent,
         retry: options?.retry,
         timeout: options?.timeout,
       });
@@ -653,7 +721,7 @@ class ProxyStorage implements IProxy {
       // Otherwise misconfigured proxy could return 407:
       // https://github.com/rlidwka/sinopia/issues/254
       // @ts-ignore
-      if (!this.proxy) {
+      if (!this.agent) {
         headers[HEADERS.FORWARDED_FOR] =
           (req.headers['x-forwarded-for'] ? req.headers['x-forwarded-for'] + ', ' : '') +
           req.connection.remoteAddress;
@@ -761,18 +829,14 @@ class ProxyStorage implements IProxy {
               { url: this.url.href, rule: noProxyItem },
               'not using proxy for @{url}, excluded by @{rule} rule'
             );
-            // @ts-ignore
-            this.proxy = false;
+            this.proxy = undefined;
           }
           break;
         }
       }
     }
 
-    // if it's non-string (i.e. "false"), don't use it
-    if (_.isString(this.proxy) === false) {
-      delete this.proxy;
-    } else {
+    if (typeof this.proxy === 'string') {
       this.logger.debug(
         { url: this.url.href, proxy: this.proxy },
         'using proxy @{proxy} for @{url}'
