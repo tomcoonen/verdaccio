@@ -1,6 +1,7 @@
 /* global AbortController */
 import JSONStream from 'JSONStream';
 import buildDebug from 'debug';
+import fs from 'fs';
 import got, { Headers as gotHeaders } from 'got';
 import type { Options } from 'got';
 import _ from 'lodash';
@@ -276,9 +277,9 @@ class ProxyStorage implements IProxy {
       agentOptions: this.agent_options,
     };
 
-    if (this.ca) {
+    if (typeof this.ca === 'string') {
       requestOptions = Object.assign({}, requestOptions, {
-        ca: this.ca,
+        ca: fs.readFileSync(this.ca),
       });
     }
 
