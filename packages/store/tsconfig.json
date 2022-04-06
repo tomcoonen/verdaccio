@@ -11,10 +11,13 @@
       "path": "../config"
     },
     {
-      "path": "../core/local-storage"
+      "path": "../plugins/local-storage"
     },
     {
       "path": "../core/streams"
+    },
+    {
+      "path": "../core/url"
     },
     {
       "path": "../core/core"

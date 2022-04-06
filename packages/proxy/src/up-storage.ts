@@ -3,9 +3,11 @@ import JSONStream from 'JSONStream';
 import buildDebug from 'debug';
 import fs from 'fs';
 import got, { Headers as gotHeaders } from 'got';
-import type { Options } from 'got';
+import type { Agents, Options } from 'got';
+import type { Agent as AgentHTTP } from 'http';
+import type { Agent as AgentHTTPS } from 'https';
 import _ from 'lodash';
-import ProxyAgent, { ProxyAgentConstructor } from 'proxy-agent';
+import ProxyAgent from 'proxy-agent';
 import requestDeprecated from 'request';
 import Stream, { PassThrough, Readable } from 'stream';
 import { Headers, fetch as undiciFetch } from 'undici';
@@ -85,6 +87,7 @@ export interface IProxy {
 export interface ISyncUplinksOptions extends Options {
   uplinksLook?: boolean;
   etag?: string;
+  remoteAddress?: string;
 }
 
 /**
@@ -108,7 +111,7 @@ class ProxyStorage implements IProxy {
   // @ts-ignore
   public upname: string;
   public proxy: string | undefined;
-  private agent: typeof ProxyAgentConstructor | undefined;
+  private agent: Agents | undefined;
   // @ts-ignore
   public last_request_time: number | null;
   public strict_ssl: boolean;
@@ -125,11 +128,19 @@ class ProxyStorage implements IProxy {
     this.ca = config.ca;
     this.logger = LoggerApi.logger.child({ sub: 'out' });
     this.server_id = mainConfig.server_id;
-
+    this.agent_options = setConfig(this.config, 'agent_options', {
+      keepAlive: true,
+      maxSockets: 40,
+      maxFreeSockets: 10,
+    });
     this.url = new URL(this.config.url);
-    this._setupProxy(this.url.hostname, config, mainConfig, this.url.protocol === 'https:');
+    const isHTTPS = this.url.protocol === 'https:';
+    this._setupProxy(this.url.hostname, config, mainConfig, isHTTPS);
     if (typeof this.proxy === 'string') {
-      this.agent = new ProxyAgent(this.proxy);
+      // TODO: pending hook agent_options options
+      this.agent = isHTTPS
+        ? { https: new ProxyAgent(this.proxy) as AgentHTTPS }
+        : { http: new ProxyAgent(this.proxy) as AgentHTTP };
     }
     this.config.url = this.config.url.replace(/\/$/, '');
 
@@ -150,11 +161,6 @@ class ProxyStorage implements IProxy {
     this.max_fails = Number(setConfig(this.config, 'max_fails', 2));
     this.fail_timeout = parseInterval(setConfig(this.config, 'fail_timeout', '5m'));
     this.strict_ssl = Boolean(setConfig(this.config, 'strict_ssl', true));
-    this.agent_options = setConfig(this.config, 'agent_options', {
-      keepAlive: true,
-      maxSockets: 40,
-      maxFreeSockets: 10,
-    });
   }
 
   /**
@@ -501,6 +507,7 @@ class ProxyStorage implements IProxy {
 
    * @param {Object} headers
    * @private
+   * @deprecated use applyUplinkHeaders
    */
   private _overrideWithUpLinkConfLocaligHeaders(headers: Headers): any {
     if (!this.config.headers) {
@@ -514,13 +521,29 @@ class ProxyStorage implements IProxy {
     }
   }
 
+  private applyUplinkHeaders(headers: gotHeaders): gotHeaders {
+    if (!this.config.headers) {
+      return headers;
+    }
+
+    // add/override headers specified in the config
+    /* eslint guard-for-in: 0 */
+    for (const key in this.config.headers) {
+      headers[key] = this.config.headers[key];
+    }
+    return headers;
+  }
+
   public async getRemoteMetadataNext(
     name: string,
     options: ISyncUplinksOptions
   ): Promise<[Manifest, string]> {
     // FUTURE: allow mix headers that comes from the client
     debug('get metadata for %s', name);
-    const headers = this.getHeadersNext(options?.headers);
+    let headers = this.getHeadersNext(options?.headers);
+    headers = this.addProxyHeadersNext(headers, options.remoteAddress);
+    headers = this.applyUplinkHeaders(headers);
+    // the following headers cannot be overwritten
     if (_.isNil(options.etag) === false) {
       headers[HEADERS.NONE_MATCH] = options.etag;
       headers[HEADERS.ACCEPT] = contentTypeAccept;
@@ -713,6 +736,7 @@ class ProxyStorage implements IProxy {
    * FIXME: object mutations, it should return an new object
    * @param {*} req the http request
    * @param {*} headers the request headers
+   * @deprecated addProxyHeadersNext
    */
   private _addProxyHeaders(req: any, headers: any): void {
     if (req) {
@@ -733,6 +757,23 @@ class ProxyStorage implements IProxy {
     headers['Via'] = req?.headers['via'] ? req.headers['via'] + ', ' : '';
 
     headers['Via'] += '1.1 ' + this.server_id + ' (Verdaccio)';
+  }
+
+  private addProxyHeadersNext(headers: gotHeaders, remoteAddress?: string): gotHeaders {
+    // Only submit X-Forwarded-For field if we don't have a proxy selected
+    // in the config file.
+    //
+    // Otherwise misconfigured proxy could return 407
+    if (!this.agent) {
+      headers[HEADERS.FORWARDED_FOR] =
+        (headers['x-forwarded-for'] ? headers['x-forwarded-for'] + ', ' : '') + remoteAddress;
+    }
+
+    // always attach Via header to avoid loops, even if we're not proxying
+    headers['via'] = headers['via'] ? headers['via'] + ', ' : '';
+    headers['via'] += '1.1 ' + this.server_id + ' (Verdaccio)';
+
+    return headers;
   }
 
   /**

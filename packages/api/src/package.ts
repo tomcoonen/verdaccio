@@ -50,6 +50,7 @@ export default function (route: Router, auth: IAuth, storage: Storage): void {
         headers: req.headers as any,
         // FIXME: if we migrate to req.hostname, the port is not longer included.
         host: req.host,
+        remoteAddress: req.socket.remoteAddress,
       };
 
       try {
@@ -64,6 +65,8 @@ export default function (route: Router, auth: IAuth, storage: Storage): void {
         const manifest = await storage.getPackageByOptions({
           name,
           uplinksLook: true,
+          // remove on refactor getPackageByOptions
+          // @ts-ignore
           req,
           version: queryVersion,
           requestOptions,

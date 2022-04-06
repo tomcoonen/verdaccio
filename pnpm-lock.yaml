@@ -1026,6 +1026,7 @@ importers:
       '@verdaccio/tarball': workspace:11.0.0-6-next.12
       '@verdaccio/test-helper': workspace:1.1.0-6-next.0
       '@verdaccio/types': workspace:11.0.0-6-next.12
+      '@verdaccio/url': workspace:11.0.0-6-next.9
       '@verdaccio/utils': workspace:6.0.0-6-next.11
       async: 3.2.3
       debug: 4.3.3
@@ -1045,6 +1046,7 @@ importers:
       '@verdaccio/proxy': link:../proxy
       '@verdaccio/streams': link:../core/streams
       '@verdaccio/tarball': link:../core/tarball
+      '@verdaccio/url': link:../core/url
       '@verdaccio/utils': link:../utils
       async: 3.2.3
       debug: 4.3.3

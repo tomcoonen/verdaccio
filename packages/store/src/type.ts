@@ -1,28 +1,23 @@
 import { Callback, Config, IPluginStorageFilter, RemoteUser } from '@verdaccio/types';
+import { RequestOptions } from '@verdaccio/url';
 
-// @deprecated
+// @deprecated use IGetPackageOptionsNext
 export interface IGetPackageOptions {
   callback: Callback;
   name: string;
   keepUpLinkData?: boolean;
   uplinksLook: boolean;
+  // @deprecated
   req: any;
 }
 
 export type IGetPackageOptionsNext = {
-  // @deprecated remove this soon
-  req: any;
   name: string;
   version?: string;
   keepUpLinkData?: boolean;
   remoteUser?: RemoteUser;
   uplinksLook: boolean;
-  requestOptions: {
-    // RequestOptions from url package
-    host: string;
-    protocol: string;
-    headers: { [key: string]: string };
-  };
+  requestOptions: RequestOptions;
 };
 
 export interface ISyncUplinks {

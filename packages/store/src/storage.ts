@@ -483,6 +483,8 @@ class Storage extends AbstractStorage {
       debug('sync uplinks for %o', name);
       // @ts-expect-error
       return this._syncUplinksMetadataPackageNext(name, data, {
+        // this property should be removed soon
+        // @ts-ignore
         req: options.req,
         uplinksLook: options.uplinksLook,
         keepUpLinkData: options.keepUpLinkData,
@@ -719,7 +721,7 @@ class Storage extends AbstractStorage {
   public async mergeCacheRemoteMetadata(
     uplink: IProxy,
     cachedManifest: Manifest,
-    options: any
+    options: ISyncUplinksOptions
   ): Promise<Manifest> {
     // we store which uplink is updating the manifest
     const upLinkMeta = cachedManifest._uplinks[uplink.upname];
