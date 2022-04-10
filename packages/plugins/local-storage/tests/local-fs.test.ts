@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import { PassThrough } from 'stream';
 
 import { createTempFolder } from '@verdaccio/test-helper';
 import { ILocalPackageManager, Logger, Package } from '@verdaccio/types';
@@ -138,6 +139,26 @@ describe('Local FS test', () => {
         logger
       );
       await expect(localFs.removePackage()).rejects.toThrow(/ENOENT/);
+    });
+  });
+
+  describe('readTarballNext', () => {
+    test('read a tarball', (done) => {
+      const localFs = new LocalDriver(path.join(__dirname, '__fixtures__/readme-test'), logger);
+      const controller = new AbortController();
+      localFs
+        .readTarballNext('test-readme-0.0.0.tgz', { signal: controller.signal })
+        .then((stream: PassThrough) => {
+          stream.on('data', (data) => {
+            expect(data.length).toEqual(352);
+          });
+          stream.on('content-length', (content) => {
+            expect(content).toEqual(352);
+          });
+          stream.on('end', () => {
+            done();
+          });
+        });
     });
   });
 

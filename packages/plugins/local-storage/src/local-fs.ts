@@ -3,6 +3,8 @@ import buildDebug from 'debug';
 import fs from 'fs';
 import _ from 'lodash';
 import path from 'path';
+import { PassThrough, addAbortSignal } from 'stream';
+import { pipeline } from 'stream/promises';
 
 import { VerdaccioError, errorUtils } from '@verdaccio/core';
 import { readFile, readFileNext, unlockFile, unlockFileNext } from '@verdaccio/file-locking';
@@ -10,6 +12,7 @@ import { ReadTarball, UploadTarball } from '@verdaccio/streams';
 import { Callback, ILocalPackageManager, IUploadTarball, Logger, Package } from '@verdaccio/types';
 
 import {
+  fstatPromise,
   mkdirPromise,
   openPromise,
   readFilePromise,
@@ -386,6 +389,23 @@ export default class LocalFS implements ILocalFSPackageManager {
     });
 
     return uploadStream;
+  }
+
+  public async readTarballNext(pkgName: string, { signal }): Promise<PassThrough> {
+    const pathName: string = this._getStorage(pkgName);
+    const passStream = new PassThrough();
+    const readStream = addAbortSignal(signal, fs.createReadStream(pathName));
+    readStream.on('open', async function (fileDescriptor) {
+      const stats = await fstatPromise(fileDescriptor);
+      passStream.emit('content-length', stats.size);
+    });
+    readStream.on('error', (err) => {
+      passStream.emit('error', err);
+    });
+
+    await pipeline(readStream, passStream);
+
+    return passStream;
   }
 
   public readTarball(name: string): ReadTarball {

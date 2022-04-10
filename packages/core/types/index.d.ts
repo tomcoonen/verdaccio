@@ -1,5 +1,5 @@
 /// <reference types="node" />
-import { PassThrough } from 'stream';
+import { PassThrough, PipelinePromise, Stream } from 'stream';
 
 declare module '@verdaccio/types' {
   type StringValue = string | void | null;
@@ -517,12 +517,13 @@ declare module '@verdaccio/types' {
   interface ILocalPackageManager {
     logger: Logger;
     writeTarball(pkgName: string): IUploadTarball;
+    // @deprecated use readTarballNext
     readTarball(pkgName: string): IReadTarball;
     readPackage(fileName: string, callback: ReadPackageCallback): void;
     createPackage(pkgName: string, value: Package, cb: CallbackAction): void;
     deletePackage(fileName: string): Promise<void>;
     removePackage(): Promise<void>;
-    // @deprecated
+    // @deprecated use updatePackageNext
     updatePackage(
       pkgFileName: string,
       updateHandler: StorageUpdateCallback,
@@ -530,14 +531,15 @@ declare module '@verdaccio/types' {
       transformPackage: PackageTransformer,
       onEnd: Callback
     ): void;
-    // @deprecated
+    // @deprecated use savePackageNext
     savePackage(fileName: string, json: Package, callback: CallbackAction): void;
     //  next packages migration (this list is meant to replace the callback parent functions)
     updatePackageNext(
       packageName: string,
-      handleUpdate: (manifest: Package) => Promise<Package>
-    ): Promise<Package>;
-    savePackageNext(name: string, value: Package): Promise<void>;
+      handleUpdate: (manifest: Manifest) => Promise<Package>
+    ): Promise<Manifest>;
+    savePackageNext(pkgName: string, value: Manifest): Promise<void>;
+    readTarballNext(pkgName: string): Promise<PassThrough>;
   }
 
   interface TarballActions {

@@ -1,3 +1,4 @@
+import fsCallback from 'fs';
 import fs from 'fs/promises';
 
 const readFile = fs.readFile;
@@ -10,11 +11,23 @@ const rmdirPromise = fs.rmdir;
 const renamePromise = fs.rename;
 const openPromise = fs.open;
 
-export const readFilePromise = async (path) => {
+const readFilePromise = async (path) => {
   return await readFile(path, 'utf8');
 };
 
+function fstatPromise(fd): Promise<fsCallback.Stats> {
+  return new Promise((resolve, reject) => {
+    fsCallback.fstat(fd, function (err, stats) {
+      if (err) {
+        return reject(err);
+      }
+      return resolve(stats);
+    });
+  });
+}
+
 export {
+  readFilePromise,
   renamePromise,
   mkdirPromise,
   writeFilePromise,
@@ -23,4 +36,5 @@ export {
   unlinkPromise,
   rmdirPromise,
   openPromise,
+  fstatPromise,
 };
