@@ -1,5 +1,8 @@
 import buildDebug from 'debug';
 import { fs } from 'memfs';
+import { Stats } from 'memfs/lib/Stats';
+import { PassThrough, addAbortSignal } from 'stream';
+import { pipeline } from 'stream/promises';
 
 import { VerdaccioError, errorUtils } from '@verdaccio/core';
 import { ReadTarball, UploadTarball } from '@verdaccio/streams';
@@ -19,6 +22,17 @@ import {
 import { parsePackage, stringifyPackage } from './utils';
 
 const debug = buildDebug('verdaccio:plugin:storage:memory-storage');
+
+function fstatPromise(fd): Promise<Stats | undefined> {
+  return new Promise((resolve, reject) => {
+    fs.fstat(fd, function (err, stats) {
+      if (err) {
+        return reject(err);
+      }
+      return resolve(stats);
+    });
+  });
+}
 
 export type DataHandler = {
   [key: string]: string;
@@ -151,6 +165,23 @@ class MemoryHandler implements IPackageStorageManager {
     });
 
     return uploadStream;
+  }
+
+  public async readTarballNext(pkgName: string, { signal }): Promise<PassThrough> {
+    const pathName: string = this._getStorage(pkgName);
+    const passStream = new PassThrough();
+    const readStream = addAbortSignal(signal, fs.createReadStream(pathName));
+    readStream.on('open', async function (fileDescriptor) {
+      const stats = await fstatPromise(fileDescriptor);
+      passStream.emit('content-length', stats?.size);
+    });
+    readStream.on('error', (err) => {
+      passStream.emit('error', err);
+    });
+
+    await pipeline(readStream, passStream);
+
+    return passStream;
   }
 
   public readTarball(name: string): IReadTarball {

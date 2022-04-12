@@ -539,7 +539,7 @@ declare module '@verdaccio/types' {
       handleUpdate: (manifest: Manifest) => Promise<Package>
     ): Promise<Manifest>;
     savePackageNext(pkgName: string, value: Manifest): Promise<void>;
-    readTarballNext(pkgName: string): Promise<PassThrough>;
+    readTarballNext(pkgName: string, { signal }): Promise<PassThrough>;
   }
 
   interface TarballActions {

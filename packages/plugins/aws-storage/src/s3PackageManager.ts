@@ -1,7 +1,8 @@
 import { AWSError, S3 } from 'aws-sdk';
 import { HttpError } from 'http-errors';
+import { PassThrough } from 'stream';
 
-import { HEADERS, HTTP_STATUS, VerdaccioError } from '@verdaccio/core';
+import { HEADERS, HTTP_STATUS, VerdaccioError, errorUtils } from '@verdaccio/core';
 import { ReadTarball, UploadTarball } from '@verdaccio/streams';
 import { Callback, CallbackAction, ILocalPackageManager, Logger, Package } from '@verdaccio/types';
 
@@ -406,6 +407,13 @@ export default class S3PackageManager implements ILocalPackageManager {
     );
 
     return uploadStream;
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  public async readTarballNext(pkgName: string, { signal }): Promise<PassThrough> {
+    const stream = new PassThrough();
+    stream.emit('error', errorUtils.getInternalError('not inplemented'));
+    return stream;
   }
 
   public readTarball(name: string): ReadTarball {

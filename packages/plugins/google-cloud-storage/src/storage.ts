@@ -1,6 +1,6 @@
 import { DownloadResponse, File } from '@google-cloud/storage';
 import { Response } from 'request';
-import { Readable } from 'stream';
+import { PassThrough, Readable } from 'stream';
 
 import { HTTP_STATUS, VerdaccioError, errorUtils } from '@verdaccio/core';
 import { ReadTarball, UploadTarball } from '@verdaccio/streams';
@@ -218,6 +218,13 @@ class GoogleCloudStorageHandler implements IPackageStorageManager {
 
   private _convertToString(value: Package): string {
     return JSON.stringify(value, null, '\t');
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  public async readTarballNext(pkgName: string, { signal }): Promise<PassThrough> {
+    const stream = new PassThrough();
+    stream.emit('error', errorUtils.getInternalError('not inplemented'));
+    return stream;
   }
 
   public readPackage(name: string, cb: ReadPackageCallback): void {
