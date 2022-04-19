@@ -9,7 +9,14 @@ import { pipeline } from 'stream/promises';
 import { VerdaccioError, errorUtils } from '@verdaccio/core';
 import { readFile, readFileNext, unlockFile, unlockFileNext } from '@verdaccio/file-locking';
 import { ReadTarball, UploadTarball } from '@verdaccio/streams';
-import { Callback, ILocalPackageManager, IUploadTarball, Logger, Package } from '@verdaccio/types';
+import {
+  Callback,
+  ILocalPackageManager,
+  IUploadTarball,
+  Logger,
+  Manifest,
+  Package,
+} from '@verdaccio/types';
 
 import {
   fstatPromise,
@@ -69,20 +76,28 @@ const renameTmp = function (src, dst, _cb): void {
 };
 
 export async function renameTmpNext(src: string, dst: string): Promise<void> {
+  debug('rename %s to %s', src, dst);
   if (process.platform !== 'win32') {
-    await renamePromise(src, dst);
-    await unlinkPromise(src);
+    try {
+      await renamePromise(src, dst);
+    } catch (err: any) {
+      debug('error rename %s error %s', src, err?.message);
+      await unlinkPromise(src);
+    }
   } else {
+    debug('rename w32 enable');
     // FUTURE: find a better wat to handle this scenario
     // windows can't remove opened file,
     // but it seem to be able to rename it
     const tmp = tempFile(dst);
+    debug('temp file %s', tmp);
     try {
       // this is intended to fail
       await renamePromise(dst, tmp);
       // we clean the fake temp folder
       await unlinkPromise(tmp);
     } catch (err: any) {
+      debug('temp file files %s error %s', tmp, err?.message);
       // this is only for windows, should be able to rename the file at this point
       await renamePromise(src, dst);
     }
@@ -258,7 +273,7 @@ export default class LocalFS implements ILocalFSPackageManager {
     this._createFile(this._getStorage(packageJSONFileName), this._convertToString(manifest), cb);
   }
 
-  public async createPackagNext(name: string, manifest: Package): Promise<void> {
+  public async createPackagNext(name: string, manifest: Manifest): Promise<void> {
     debug('create a package %o', name);
 
     await this.createFileNext(
@@ -450,7 +465,7 @@ export default class LocalFS implements ILocalFSPackageManager {
    * @deprecated use createFileNext instead
    */
   private _createFile(name: string, contents: any, callback: Function): void {
-    debug(' create a new file: %o', name);
+    debug('create a new file: %o', name);
 
     fs.open(name, 'wx', (err) => {
       if (err) {
@@ -500,9 +515,9 @@ export default class LocalFS implements ILocalFSPackageManager {
     return JSON.stringify(value, null, '\t');
   }
 
-  private _getStorage(fileName = ''): string {
+  public _getStorage(fileName = ''): string {
     const storagePath: string = path.join(this.path, fileName);
-
+    debug('get storage %s', storagePath);
     return storagePath;
   }
 
@@ -513,7 +528,7 @@ export default class LocalFS implements ILocalFSPackageManager {
 
       fs.writeFile(tempFilePath, data, (err) => {
         if (err) {
-          debug('error on write the file: %o', dest);
+          debug('error on write the file: %o with %s', dest, err?.code);
           return cb(err);
         }
 

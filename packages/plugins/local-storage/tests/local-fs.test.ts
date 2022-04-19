@@ -1,15 +1,25 @@
+import { rejects } from 'assert';
 import fs from 'fs';
 import path from 'path';
 import { PassThrough } from 'stream';
 
 import { createTempFolder } from '@verdaccio/test-helper';
-import { ILocalPackageManager, Logger, Package } from '@verdaccio/types';
+import { ILocalPackageManager, Logger, Manifest, Package } from '@verdaccio/types';
 
 import LocalDriver, { fSError, fileExist, noSuchFile, resourceNotAvailable } from '../src/local-fs';
 import pkg from './__fixtures__/pkg';
 
 let localTempStorage: string;
 const pkgFileName = 'package.json';
+
+// returns a promise which resolves true if file exists:
+function checkFileExists(filepath) {
+  return new Promise((resolve) => {
+    fs.access(filepath, fs.constants.F_OK, (error) => {
+      resolve(!error);
+    });
+  });
+}
 
 const logger: Logger = {
   error: jest.fn(),
@@ -107,9 +117,12 @@ describe('Local FS test', () => {
     describe('deletePackage() group', () => {
       test('should delete a package', async () => {
         const localFs = new LocalDriver(path.join(localTempStorage, 'createPackage'), logger);
-        await localFs.createPackagNext('createPackage', pkg);
+        await localFs.createPackagNext('createPackage', pkg as unknown as Manifest);
         // verdaccio removes the package.json instead the package name
         await localFs.deletePackage('package.json');
+        // verify if the `package.json` does not exist anymore
+        // note: the folder still remains
+        await expect(checkFileExists(localFs._getStorage('package.json'))).resolves.toBeFalsy();
       });
       test('should fails on delete a package', async () => {
         const localFs = new LocalDriver(path.join(localTempStorage, 'createPackage'), logger);
