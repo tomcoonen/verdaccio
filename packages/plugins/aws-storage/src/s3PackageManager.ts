@@ -1,6 +1,6 @@
 import { AWSError, S3 } from 'aws-sdk';
 import { HttpError } from 'http-errors';
-import { PassThrough } from 'stream';
+import { PassThrough, Writable } from 'stream';
 
 import { HEADERS, HTTP_STATUS, VerdaccioError, errorUtils } from '@verdaccio/core';
 import { ReadTarball, UploadTarball } from '@verdaccio/streams';
@@ -66,6 +66,15 @@ export default class S3PackageManager implements ILocalPackageManager {
     } else {
       this.packagePath = `${this.config.keyPrefix}${this.packageName}`;
     }
+  }
+
+  public async writeTarballNext(pkgName: string, { signal }): Promise<Writable> {
+    // @ts-ignore
+    return new WritableStream({ write: () => {} });
+  }
+
+  public async hasFile(fileName: string): Promise<boolean> {
+    throw new Error('not  implemented');
   }
 
   public updatePackage(

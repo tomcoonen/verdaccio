@@ -20,6 +20,21 @@ export type IGetPackageOptionsNext = {
   requestOptions: RequestOptions;
 };
 
+// @deprecate remove this type
+export type PublishOptions = {
+  signal: AbortSignal;
+} & IGetPackageOptionsNext;
+
+export type UpdateManifestOptions = {
+  name: string;
+  version?: string;
+  keepUpLinkData?: boolean;
+  remoteUser?: RemoteUser;
+  uplinksLook: boolean;
+  requestOptions: RequestOptions;
+  signal: AbortSignal;
+};
+
 export interface ISyncUplinks {
   uplinksLook?: boolean;
   etag?: string;

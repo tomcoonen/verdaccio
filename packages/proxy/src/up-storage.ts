@@ -10,6 +10,7 @@ import _ from 'lodash';
 import ProxyAgent from 'proxy-agent';
 import requestDeprecated from 'request';
 import Stream, { PassThrough, Readable } from 'stream';
+import { pipeline } from 'stream/promises';
 import { Headers, fetch as undiciFetch } from 'undici';
 import { URL } from 'url';
 
@@ -168,7 +169,7 @@ class ProxyStorage implements IProxy {
    * @param {*} options
    * @param {*} cb
    * @return {Request}
-   * @deprecated
+   * @deprecated do no tuse
    */
   private request(options: any, cb?: Callback): Stream.Readable {
     let json;
@@ -558,6 +559,7 @@ class ProxyStorage implements IProxy {
         responseType: 'json',
         method,
         agent: this.agent,
+        // FIXME: this should be taken from construtor as priority
         retry: options?.retry,
         timeout: options?.timeout,
       });
@@ -598,6 +600,7 @@ class ProxyStorage implements IProxy {
    * @param {*} name package name
    * @param {*} options request options, eg: eTag.
    * @param {*} callback
+   * @deprecated do not use this method, use getRemoteMetadataNext
    */
   public getRemoteMetadata(name: string, options: any, callback: Callback): void {
     const headers = {};
@@ -631,6 +634,85 @@ class ProxyStorage implements IProxy {
         callback(null, body, res.headers.etag);
       }
     );
+  }
+
+  public async fetchTarballNext(url: string, options: ISyncUplinksOptions): Promise<any> {
+    return new Promise((resolve, reject) => {
+      let current_length = 0;
+      let expected_length;
+      const fetchStream = new PassThrough({});
+      debug('fetching url for %s', url);
+      let headers = this.getHeadersNext(options?.headers);
+      headers = this.addProxyHeadersNext(headers, options.remoteAddress);
+      headers = this.applyUplinkHeaders(headers);
+      // the following headers cannot be overwritten
+      if (_.isNil(options.etag) === false) {
+        headers[HEADERS.NONE_MATCH] = options.etag;
+        headers[HEADERS.ACCEPT] = contentTypeAccept;
+      }
+      const method = 'GET';
+      // const uri = this.config.url + `/${encode(name)}`;
+      debug('request uri for %s', url);
+      const readStream = got.stream(url, {
+        headers,
+        method,
+        agent: this.agent,
+        // FIXME: this should be taken from construtor as priority
+        retry: options?.retry,
+        timeout: options?.timeout,
+      });
+
+      readStream.on('request', async function (req) {
+        try {
+          await pipeline(readStream, fetchStream);
+        } catch (err: any) {
+          reject(err);
+        }
+      });
+
+      readStream.on('response', (res) => {
+        // if (response.headers.age > 3600) {
+        //   console.log('Failure - response too old');
+        //   readStream.destroy(); // Destroy the stream to prevent hanging resources.
+        //   return;
+        // }
+        if (res.statusCode === HTTP_STATUS.NOT_FOUND) {
+          return fetchStream.emit(
+            'error',
+            errorUtils.getNotFound(errorUtils.API_ERROR.NOT_FILE_UPLINK)
+          );
+        }
+
+        if (!(res.statusCode >= HTTP_STATUS.OK && res.statusCode < HTTP_STATUS.MULTIPLE_CHOICES)) {
+          return fetchStream.emit(
+            'error',
+            errorUtils.getInternalError(`bad uplink status code: ${res.statusCode}`)
+          );
+        }
+
+        if (res.headers[HEADER_TYPE.CONTENT_LENGTH]) {
+          expected_length = res.headers[HEADER_TYPE.CONTENT_LENGTH];
+          fetchStream.emit(HEADER_TYPE.CONTENT_LENGTH, res.headers[HEADER_TYPE.CONTENT_LENGTH]);
+        }
+        // readStream.on('retry', {});
+
+        // Prevent `onError` being called twice.
+        // readStream.off('error', (err) => {
+        //   console.log('error stream fetch', err);
+        // });
+
+        // try {
+        //   // await pipeline(readStream, createWriteStream('image.png'));
+
+        //   console.log('Success');
+        //   retr
+        // } catch (error) {
+        //   onError(error);
+        // }
+      });
+
+      resolve(fetchStream);
+    });
   }
 
   /**
@@ -780,6 +862,7 @@ class ProxyStorage implements IProxy {
    * Check whether the remote host is available.
    * @param {*} alive
    * @return {Boolean}
+   * @deprecated not use
    */
   private _statusCheck(alive?: boolean): boolean | void {
     if (arguments.length === 0) {
@@ -814,6 +897,7 @@ class ProxyStorage implements IProxy {
    * If the request failure.
    * @return {boolean}
    * @private
+   * @deprecated dont use
    */
   private _ifRequestFailure(): boolean {
     return (

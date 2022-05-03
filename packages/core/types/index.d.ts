@@ -1,5 +1,5 @@
 /// <reference types="node" />
-import { PassThrough, PipelinePromise, Stream } from 'stream';
+import { PassThrough, PipelinePromise, Readable, Stream, Writable } from 'stream';
 
 declare module '@verdaccio/types' {
   type StringValue = string | void | null;
@@ -71,9 +71,17 @@ declare module '@verdaccio/types' {
     bodyAfter?: string[];
   } & CommonWebConf;
 
+  interface Signatures {
+    keyid: string
+    sig: string;
+  }
+
   interface Dist {
+    'npm-signature'?: string;
+    fileCount?: number;
     integrity?: string;
     shasum: string;
+    unpackedSize?: number;
     tarball: string;
   }
 
@@ -157,6 +165,7 @@ declare module '@verdaccio/types' {
 
   interface AttachMentsItem {
     content_type?: string;
+    // FIXME: should be mandatory, review
     data?: string;
     length?: number;
     shasum?: string;
@@ -326,7 +335,7 @@ declare module '@verdaccio/types' {
     user: string;
   }
 
-  type IPackageStorage = ILocalPackageManager | void;
+  type IPackageStorage = ILocalPackageManager | undefined;
   type IPackageStorageManager = ILocalPackageManager;
   type IPluginStorage<T> = ILocalData<T>;
 
@@ -516,6 +525,7 @@ declare module '@verdaccio/types' {
 
   interface ILocalPackageManager {
     logger: Logger;
+    // @deprecated use writeTarballNext
     writeTarball(pkgName: string): IUploadTarball;
     // @deprecated use readTarballNext
     readTarball(pkgName: string): IReadTarball;
@@ -539,7 +549,9 @@ declare module '@verdaccio/types' {
       handleUpdate: (manifest: Manifest) => Promise<Package>
     ): Promise<Manifest>;
     savePackageNext(pkgName: string, value: Manifest): Promise<void>;
-    readTarballNext(pkgName: string, { signal }): Promise<PassThrough>;
+    readTarballNext(pkgName: string, { signal }): Promise<Readable>;
+    writeTarballNext(tarballName: string, { signal }): Promise<Writable>;
+    hasFile(fileName: string): Promise<boolean>;
   }
 
   interface TarballActions {

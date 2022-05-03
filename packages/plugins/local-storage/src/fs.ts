@@ -3,6 +3,7 @@ import fs from 'fs/promises';
 
 const readFile = fs.readFile;
 const mkdirPromise = fs.mkdir;
+const accessPromise = fs.access;
 const writeFilePromise = fs.writeFile;
 const readdirPromise = fs.readdir;
 const statPromise = fs.stat;
@@ -33,6 +34,7 @@ export {
   writeFilePromise,
   readdirPromise,
   statPromise,
+  accessPromise,
   unlinkPromise,
   rmdirPromise,
   openPromise,

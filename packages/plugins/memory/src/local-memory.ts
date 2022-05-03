@@ -1,4 +1,5 @@
 import buildDebug from 'debug';
+import { Writable } from 'stream';
 
 import { errorUtils } from '@verdaccio/core';
 import { Callback, Config, IPluginStorage, Logger, PluginOptions, Token } from '@verdaccio/types';
@@ -91,6 +92,10 @@ class LocalMemory implements IPluginStorage<ConfigMemory> {
 
   public getPackageStorage(packageInfo: string): MemoryHandler {
     return new MemoryHandler(packageInfo, this.data.files, this.logger);
+  }
+
+  public async hasFile(fileName: string): Promise<boolean> {
+    throw new Error('not  implemented');
   }
 
   private _createEmtpyDatabase(): MemoryLocalStorage {

@@ -1,6 +1,6 @@
 import { DownloadResponse, File } from '@google-cloud/storage';
 import { Response } from 'request';
-import { PassThrough, Readable } from 'stream';
+import { PassThrough, Readable, Writable } from 'stream';
 
 import { HTTP_STATUS, VerdaccioError, errorUtils } from '@verdaccio/core';
 import { ReadTarball, UploadTarball } from '@verdaccio/streams';
@@ -44,6 +44,15 @@ class GoogleCloudStorageHandler implements IPackageStorageManager {
     this.helper = helper;
     this.config = config;
     this.key = 'VerdaccioMetadataStore';
+  }
+
+  public async writeTarballNext(pkgName: string, { signal }): Promise<Writable> {
+    // @ts-ignore
+    return new WritableStream({ write: () => {} });
+  }
+
+  public async hasFile(fileName: string): Promise<boolean> {
+    throw new Error('not  implemented');
   }
 
   public updatePackage(

@@ -5,14 +5,7 @@ import mime from 'mime';
 import Path from 'path';
 
 import { IAuth } from '@verdaccio/auth';
-import {
-  API_ERROR,
-  API_MESSAGE,
-  DIST_TAGS,
-  HEADERS,
-  HTTP_STATUS,
-  errorUtils,
-} from '@verdaccio/core';
+import { API_ERROR, API_MESSAGE, DIST_TAGS, HTTP_STATUS, errorUtils } from '@verdaccio/core';
 import { notify } from '@verdaccio/hooks';
 import { logger } from '@verdaccio/logger';
 import { allow, expectJson, media } from '@verdaccio/middleware';
@@ -106,6 +99,14 @@ export default function publish(
     publishPackage(storage, config, auth)
   );
 
+  router.put(
+    '/new/:package/:_rev?/:revision?',
+    can('publish'),
+    media(mime.getType('json')),
+    expectJson,
+    publishPackageNext(storage)
+  );
+
   /**
    * Un-publishing an entire package.
    *
@@ -124,14 +125,6 @@ export default function publish(
     removeTarball(storage)
   );
 
-  // uploading package tarball
-  router.put(
-    '/:package/-/:filename/*',
-    can('publish'),
-    media(HEADERS.OCTET_STREAM),
-    uploadPackageTarball(storage)
-  );
-
   // adding a version
   router.put(
     '/:package/:version/-tag/:tag',
@@ -142,6 +135,41 @@ export default function publish(
   );
 }
 
+export function publishPackageNext(storage: Storage): any {
+  return async function (
+    req: $RequestExtend,
+    res: $ResponseExtend,
+    next: $NextFunctionVer
+  ): Promise<void> {
+    const ac = new AbortController();
+    const packageName = req.params.package;
+    const metadata = req.body;
+
+    try {
+      const stream = await storage.updateManifest(metadata, {
+        name: packageName,
+        signal: ac.signal,
+        requestOptions: {
+          host: req.hostname,
+          protocol: req.protocol,
+          // @ts-ignore
+          headers: req.headers,
+        },
+      });
+
+      stream.on('success', () => {
+        return next({
+          ok: 'ok',
+          success: true,
+        });
+      });
+    } catch (err: any) {
+      ac.abort();
+      logger.error({ err: err }, 'publish has failed: @{err}');
+      next(err);
+    }
+  };
+}
 /**
  * Publish a package
  */
@@ -399,41 +427,6 @@ export function addVersion(storage: Storage) {
       res.status(HTTP_STATUS.CREATED);
       return next({
         ok: API_MESSAGE.PKG_PUBLISHED,
-      });
-    });
-  };
-}
-
-/**
- * uploadPackageTarball
- */
-export function uploadPackageTarball(storage: Storage) {
-  return function (req: $RequestExtend, res: $ResponseExtend, next: $NextFunctionVer): void {
-    const packageName = req.params.package;
-    const stream = storage.addTarball(packageName, req.params.filename);
-    req.pipe(stream);
-
-    // checking if end event came before closing
-    let complete = false;
-    req.on('end', function () {
-      complete = true;
-      stream.done();
-    });
-
-    req.on('close', function () {
-      if (!complete) {
-        stream.abort();
-      }
-    });
-
-    stream.on('error', function (err) {
-      return res.locals.report_error(err);
-    });
-
-    stream.on('success', function () {
-      res.status(HTTP_STATUS.CREATED);
-      return next({
-        ok: API_MESSAGE.TARBALL_UPLOADED,
       });
     });
   };

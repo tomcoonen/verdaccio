@@ -367,3 +367,17 @@ export function normalizeDistTags(manifest: Manifest): Manifest {
 
   return manifest;
 }
+
+export function hasDeprecatedVersions(pkgInfo: Manifest): boolean {
+  const { versions } = pkgInfo;
+  for (const version in versions) {
+    if (Object.prototype.hasOwnProperty.call(versions[version], 'deprecated')) {
+      return true;
+    }
+  }
+  return false;
+}
+
+export function isDeprecatedManifest(manifest: Manifest): boolean {
+  return hasDeprecatedVersions(manifest) && Object.keys(manifest._attachments).length === 0;
+}

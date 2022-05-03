@@ -20,7 +20,7 @@ export async function initializeServer(
   await storage.init(config, []);
   const auth: IAuth = new Auth(config);
   // TODO: this might not be need it, used in apiEndpoints
-  app.use(bodyParser.json({ strict: false, limit: '10mb' }));
+  app.use(bodyParser.json({ limit: '10mb' }));
   // @ts-ignore
   app.use(errorReportingMiddleware);
   // @ts-ignore

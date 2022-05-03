@@ -1,8 +1,9 @@
 import buildDebug from 'debug';
 import { Router } from 'express';
+import { pipeline } from 'stream/promises';
 
 import { IAuth } from '@verdaccio/auth';
-import { HEADERS, errorUtils } from '@verdaccio/core';
+import { HEADERS, HEADER_TYPE, errorUtils } from '@verdaccio/core';
 import { allow } from '@verdaccio/middleware';
 import { Storage } from '@verdaccio/store';
 
@@ -78,21 +79,51 @@ export default function (route: Router, auth: IAuth, storage: Storage): void {
     }
   );
 
-  route.get(
-    '/:scopedPackage/-/:scope/:filename',
-    can('access'),
-    function (req: $RequestExtend, res: $ResponseExtend): void {
-      const { scopedPackage, filename } = req.params;
+  // route.get(
+  //   '/:scopedPackage/-/:scope/:filename',
+  //   can('access'),
+  //   function (req: $RequestExtend, res: $ResponseExtend): void {
+  //     const { scopedPackage, filename } = req.params;
 
-      downloadStream(scopedPackage, filename, storage, req, res);
-    }
-  );
+  //     downloadStream(scopedPackage, filename, storage, req, res);
+  //   }
+  // );
 
   route.get(
     '/:package/-/:filename',
     can('access'),
     function (req: $RequestExtend, res: $ResponseExtend): void {
       downloadStream(req.params.package, req.params.filename, storage, req, res);
+    }
+  );
+
+  route.get(
+    '/new/:pkg/-/:filename',
+    can('access'),
+    async function (req: $RequestExtend, res: $ResponseExtend, next): Promise<void> {
+      const { pkg, filename } = req.params;
+      const abort = new AbortController();
+      try {
+        const stream = (await storage.getTarballNext(pkg, filename, {
+          signal: abort.signal,
+          enableRemote: true,
+        })) as any;
+
+        stream.on('content-length', (size) => {
+          res.header(HEADER_TYPE.CONTENT_LENGTH, size);
+        });
+
+        req.on('aborted', () => {
+          debug('search web aborted');
+          abort.abort();
+        });
+
+        await pipeline(stream, res, { signal: abort.signal });
+      } catch (err: any) {
+        console.log('error request', err);
+        res.locals.report_error(err);
+        next(err);
+      }
     }
   );
 }

@@ -2,6 +2,8 @@ import assert from 'assert';
 import async, { AsyncResultArrayCallback } from 'async';
 import buildDebug from 'debug';
 import _ from 'lodash';
+import { PassThrough, Writable } from 'stream';
+import { pipeline } from 'stream/promises';
 
 import { hasProxyTo } from '@verdaccio/config';
 import {
@@ -36,6 +38,7 @@ import AbstractStorage from './abstract-storage';
 import { LocalStorage } from './local-storage';
 // import { isPublishablePackage, validateInputs } from './star-utils';
 import {
+  STORAGE,
   checkPackageLocal,
   checkPackageRemote,
   cleanUpLinksRef,
@@ -203,6 +206,64 @@ class Storage extends AbstractStorage {
     return this.localStorage.addTarball(name, filename);
   }
 
+  public async getTarballNext(
+    name: string,
+    filename: string,
+    { signal, enableRemote }
+  ): Promise<PassThrough | void> {
+    debug('get tarball for package %o filename %o', name, filename);
+    let isOpen = false;
+    const localStream = await this.getLocalTarball(name, filename, { signal });
+    localStream.on('open', async () => {
+      isOpen = true;
+    });
+
+    try {
+      // throw new Error('no uplink');
+      const localTarballStream = new PassThrough();
+      await pipeline(localStream, localTarballStream, { signal });
+      return localTarballStream;
+    } catch (err: any) {
+      this.logger.error({ err: err.message }, 'some error on getTarballNext @{err}');
+
+      // if (isOpen || err.status !== HTTP_STATUS.NOT_FOUND) {
+      //   throw err;
+      // }
+      // if (true) {
+      if (err.code === STORAGE.NO_SUCH_FILE_ERROR || err.code === HTTP_STATUS.NOT_FOUND) {
+        const manifest = await this.getPackageLocalMetadata(name);
+        // const [updatedManifest, errors] = this.syncUplinksMetadataNext(name, manifest, {});
+        if (
+          _.isNil(err) &&
+          manifest._distfiles &&
+          _.isNil(manifest._distfiles[filename]) === false
+        ) {
+          // file exist locally
+        } else {
+          // we look up at uplinks
+          // we try to fetch the latest tarball url
+          const tarballUrl = manifest._distfiles[filename];
+
+          try {
+            const remoteStream = await this.fetchTarllballFromUpstream(name, tarballUrl);
+            return remoteStream;
+          } catch (err: any) {
+            this.logger.error({ err: err.message }, 'some error on uplink getTarballNext @{err}');
+            throw err;
+          }
+        }
+
+        // throw errorUtils.getNotFound(API_ERROR.NO_SUCH_FILE);
+      } else {
+        this.logger.error({ err: err.message }, 'some error on fatal @{err}');
+        throw err;
+      }
+    }
+
+    // 1. Falla, actualizar metadata
+    // 2. Obtener latest version tarball and append stream
+  }
+
   /**
    Get a tarball from a storage for {name} package
    Function is synchronous and returns a ReadableStream
@@ -289,6 +350,10 @@ class Storage extends AbstractStorage {
       let savestream: IUploadTarball | null = null;
       if (uplink.config.cache) {
         savestream = self.localStorage.addTarball(name, filename);
+        savestream.on('success', () => {
+          console.log(`tarball ${filename} saved locally`);
+          debug('tarball %s saved locally', filename);
+        });
       }
 
       let on_open = function (): void {
@@ -471,7 +536,7 @@ class Storage extends AbstractStorage {
     try {
       let data: Manifest;
       try {
-        data = await this.localStorage.getPackageMetadataNext(name);
+        data = await this.getPackageLocalMetadata(name);
       } catch (err: any) {
         // we don't have package locally, so we need to fetch it from uplinks
         if (err && (!err.status || err.status >= HTTP_STATUS.INTERNAL_ERROR)) {
@@ -631,150 +696,6 @@ class Storage extends AbstractStorage {
         });
     } else {
       debug('local stora instance is null');
-    }
-  }
-
-  /**
-   * Function fetches package metadata from uplinks and synchronizes it with local data
-     if package is available locally, it MUST be provided in pkginfo.
-     
-    Using this example: 
-
-    "jquery":
-      access: $all
-      publish: $authenticated
-      unpublish: $authenticated
-      # two uplinks setup
-      proxy: ver npmjs  
-      # one uplink setup
-      proxy: npmjs    
-
-    A package requires uplinks syncronization if enables the proxy section, uplinks
-    can be more than one, the more are the most slow request will take, the request
-    are made in serie and if 1st call fails, the secon will be triggered, otherwise
-    the 1st will reply and others will be discareded. The order is important.
-
-    Errors on upkinks are considered are, time outs, connection fails and http status 304, 
-    in that case the request returns empty body and we want ask next on the list if has fresh 
-    updates. 
-   */
-  public async syncUplinksMetadataNext(
-    name: string,
-    packageInfo: Manifest,
-    options: ISyncUplinksOptions = {}
-  ): Promise<[Manifest, any]> {
-    let found = false;
-    let syncManifest = {} as Manifest;
-    const upLinks: Promise<Manifest>[] = [];
-    const hasToLookIntoUplinks = _.isNil(options.uplinksLook) || options.uplinksLook;
-    debug('is sync uplink enabled %o', hasToLookIntoUplinks);
-    // ensure package has enough data
-    if (_.isNil(packageInfo) || _.isEmpty(packageInfo)) {
-      syncManifest = generatePackageTemplate(name);
-    } else {
-      syncManifest = { ...packageInfo };
-    }
-
-    for (const uplink in this.uplinks) {
-      if (hasProxyTo(name, uplink, this.config.packages) && hasToLookIntoUplinks) {
-        upLinks.push(this.mergeCacheRemoteMetadata(this.uplinks[uplink], syncManifest, options));
-      }
-    }
-
-    if (upLinks.length === 0) {
-      return [syncManifest, []];
-    }
-
-    const errors: any[] = [];
-    // we resolve uplinks async in serie, first come first serve
-    for (const uplinkRequest of upLinks) {
-      try {
-        syncManifest = await uplinkRequest;
-        found = true;
-        break;
-      } catch (err: any) {
-        errors.push(err);
-        // enforce use next uplink on the list
-        continue;
-      }
-    }
-    if (found) {
-      let updatedCacheManifest = await this.localStorage.updateVersionsNext(name, syncManifest);
-      const [filteredManifest, filtersErrors] = await this.applyFilters(updatedCacheManifest);
-      return [{ ...updatedCacheManifest, ...filteredManifest }, [...errors, ...filtersErrors]];
-    } else {
-      debug('uplinks sync failed with %o errors', errors.length);
-      for (const err of errors) {
-        const { code } = err;
-        if (code === 'ETIMEDOUT' || code === 'ESOCKETTIMEDOUT' || code === 'ECONNRESET') {
-          throw errorUtils.getServiceUnavailable(err.code);
-        }
-        // we bubble up the 304 special error case
-        if (code === HTTP_STATUS.NOT_MODIFIED) {
-          throw err;
-        }
-      }
-      throw errorUtils.getNotFound(API_ERROR.NO_PACKAGE);
-    }
-  }
-
-  public async mergeCacheRemoteMetadata(
-    uplink: IProxy,
-    cachedManifest: Manifest,
-    options: ISyncUplinksOptions
-  ): Promise<Manifest> {
-    // we store which uplink is updating the manifest
-    const upLinkMeta = cachedManifest._uplinks[uplink.upname];
-    let _cacheManifest = { ...cachedManifest };
-
-    if (validatioUtils.isObject(upLinkMeta)) {
-      const fetched = upLinkMeta.fetched;
-
-      if (fetched && Date.now() - fetched < uplink.maxage) {
-        return cachedManifest;
-      }
-    }
-
-    const remoteOptions = Object.assign({}, options, {
-      etag: upLinkMeta?.etag,
-    });
-
-    try {
-      const [remoteManifest, etag] = await uplink.getRemoteMetadataNext(
-        _cacheManifest.name,
-        remoteOptions
-      );
-      try {
-        _cacheManifest = validatioUtils.validateMetadata(remoteManifest, _cacheManifest.name);
-      } catch (err: any) {
-        this.logger.error(
-          {
-            err: err,
-          },
-          'package.json validating error @{!err?.message}\n@{err.stack}'
-        );
-        throw err;
-      }
-      // updates the _uplink metadata fields, cache, etc
-      _cacheManifest = updateUpLinkMetadata(uplink.upname, _cacheManifest, etag);
-      // merge time field cache and remote
-      _cacheManifest = mergeUplinkTimeIntoLocalNext(_cacheManifest, remoteManifest);
-      _cacheManifest = updateVersionsHiddenUpLinkNext(cachedManifest, uplink);
-      try {
-        _cacheManifest = mergeVersions(_cacheManifest, remoteManifest);
-        return _cacheManifest;
-      } catch (err: any) {
-        this.logger.error(
-          {
-            err: err,
-          },
-          'package.json mergin has failed @{!err?.message}\n@{err.stack}'
-        );
-        throw err;
-      }
-    } catch (error: any) {
-      this.logger.error('merge uplinks data has failed');
-      throw error;
     }
   }
 

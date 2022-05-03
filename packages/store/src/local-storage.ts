@@ -1,7 +1,7 @@
 import assert from 'assert';
 import buildDebug from 'debug';
 import _ from 'lodash';
-import { PassThrough } from 'stream';
+import { PassThrough, Readable } from 'stream';
 import { default as URL } from 'url';
 
 import { errorUtils, pkgUtils, pluginUtils, searchUtils, validatioUtils } from '@verdaccio/core';
@@ -116,6 +116,14 @@ class LocalStorage {
       this.logger.warn('storage plugin has been already initialized');
     }
     return;
+  }
+
+  public getStoragePlugin(): IPluginStorage {
+    if (this.storagePlugin === null) {
+      throw errorUtils.getInternalError('storage plugin is not initialized');
+    }
+
+    return this.storagePlugin;
   }
 
   public addPackage(name: string, pkg: Package, callback: Callback): void {
@@ -388,6 +396,7 @@ class LocalStorage {
    * @param {*} metadata
    * @param {*} tag
    * @param {*} callback
+   * @deprecated use addVersionNext
    */
   public addVersion(
     name: string,
@@ -472,7 +481,7 @@ class LocalStorage {
     tag: StringValue
   ): Promise<void> {
     debug(`add version %s package for %s`, version, name);
-    await this.updatePackageNext(name, async (data: Package): Promise<Package> => {
+    await this.updatePackageNext(name, async (data: Manifest): Promise<Manifest> => {
       debug('%s package is being updated', name);
       // keep only one readme per package
       data.readme = metadata.readme;
@@ -642,6 +651,7 @@ class LocalStorage {
    * @param {*} revision
    * @param {*} callback
    * @return {Function}
+   * @deprecated use changePackageNext
    */
   public changePackage(
     name: string,
@@ -721,20 +731,20 @@ class LocalStorage {
    */
   public async changePackageNext(
     name: string,
-    incomingPkg: Package,
+    incomingPkg: Manifest,
     revision: string | undefined
   ): Promise<void> {
-    debug(`change package tags for %o revision %s`, name, revision);
+    debug(`change manifest tags for %o revision %s`, name, revision);
     if (
       !validatioUtils.isObject(incomingPkg.versions) ||
       !validatioUtils.isObject(incomingPkg[DIST_TAGS])
     ) {
-      debug(`change package bad data for %o`, name);
+      debug(`change manifest bad data for %o`, name);
       throw errorUtils.getBadData();
     }
 
-    debug(`change package udapting package for %o`, name);
-    await this.updatePackageNext(name, async (localData: Package): Promise<Package> => {
+    debug(`change manifest udapting manifest for %o`, name);
+    await this.updatePackageNext(name, async (localData: Manifest): Promise<Manifest> => {
       for (const version in localData.versions) {
         const incomingVersion = incomingPkg.versions[version];
         if (_.isNil(incomingVersion)) {
@@ -891,6 +901,7 @@ class LocalStorage {
       }
     });
 
+    // NOTE: This is not handled by the storage layer
     writeStream.on('open', function (): void {
       // re-emitting open because it's handled in storage.js
       uploadStream.emit('open');
@@ -928,6 +939,7 @@ class LocalStorage {
         writeStream.abort();
       } else {
         writeStream.done();
+        // writeStream.emit('done')
       }
     };
 
@@ -963,7 +975,7 @@ class LocalStorage {
     const stream: IReadTarball = new ReadTarball({});
 
     process.nextTick((): void => {
-      stream.emit('error', errorUtils.getNotFound('no such file available'));
+      stream.emit('error', errorUtils.getNotFound(API_ERROR.NO_SUCH_FILE));
     });
     return stream;
   }
@@ -1008,7 +1020,14 @@ class LocalStorage {
     return stream;
   }
 
+  /**
+   * Use this.getPackageLocalMetadata
+   * @param name
+   * @returns
+   * @deprecated use abastract this.getPackageLocalMetadata
+   */
   public async getPackageMetadataNext(name: string): Promise<Package> {
+    // TODO: REMOVE THIS BEFORE COMMIT
     const storage: IPackageStorage = this._getLocalStorage(name);
     debug('get package metadata for %o', name);
     if (typeof storage === 'undefined') {
@@ -1025,7 +1044,7 @@ class LocalStorage {
    * @param {*} name
    * @param {*} callback
    * @return {Function}
-   * @deprecated
+   * @deprecated use abstract this.getPackageLocalMetadata
    */
   public getPackageMetadata(name: string, callback: Callback = (): void => {}): void {
     const storage: IPackageStorage = this._getLocalStorage(name);
@@ -1101,6 +1120,7 @@ class LocalStorage {
    * Retrieve a wrapper that provide access to the package location.
    * @param {Object} pkgName package name.
    * @return {Object}
+   * @deprecated use Abstract Storage
    */
   private _getLocalStorage(pkgName: string): IPackageStorage {
     debug('get local storage for %o', pkgName);
@@ -1249,10 +1269,13 @@ class LocalStorage {
    * @param {*} updateHandler function(package, cb) - update function
    * @param {*} callback callback that gets invoked after it's all updated
    * @return {Function}
+   * // TODO: Remove, moved to abstract
+   * // TODO: Remove, moved to abstract
+   * // TODO: Remove, moved to abstract
    */
   private async updatePackageNext(
     name: string,
-    updateHandler: (manifest: Package) => Promise<Package>
+    updateHandler: (manifest: Manifest) => Promise<Manifest>
   ): Promise<void> {
     const storage: IPackageStorage = this._getLocalStorage(name);
 
@@ -1292,6 +1315,7 @@ class LocalStorage {
     storage.savePackage(name, this._setDefaultRevision(json), callback);
   }
 
+  // TODO: Remove, moved to abstract
   private async writePackageNext(name: string, json: Package): Promise<void> {
     const storage: any = this._getLocalStorage(name);
     if (_.isNil(storage)) {
@@ -1301,6 +1325,7 @@ class LocalStorage {
     await storage.savePackageNext(name, this._setDefaultRevision(json));
   }
 
+  // TODO: Remove, moved to abstract
   private _setDefaultRevision(json: Package): Package {
     // calculate revision from couch db
     if (_.isString(json._rev) === false) {

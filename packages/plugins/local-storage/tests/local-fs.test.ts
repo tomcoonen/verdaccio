@@ -155,7 +155,7 @@ describe('Local FS test', () => {
   });
 
   describe('readTarballNext', () => {
-    test('read a tarball', (done) => {
+    test.only('read a tarball', (done) => {
       const localFs = new LocalDriver(path.join(__dirname, '__fixtures__/readme-test'), logger);
       const controller = new AbortController();
       localFs

@@ -25,6 +25,7 @@ export const API_ERROR = {
   NOT_FILE_UPLINK: "file doesn't exist on uplink",
   MAX_USERS_REACHED: 'maximum amount of users reached',
   VERSION_NOT_EXIST: "this version doesn't exist",
+  NO_SUCH_FILE: 'no such file available',
   UNSUPORTED_REGISTRY_CALL: 'unsupported registry call',
   FILE_NOT_FOUND: 'File not found',
   REGISTRATION_DISABLED: 'user registration disabled',

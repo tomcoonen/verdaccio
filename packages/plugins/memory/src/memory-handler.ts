@@ -1,7 +1,7 @@
 import buildDebug from 'debug';
 import { fs } from 'memfs';
 import { Stats } from 'memfs/lib/Stats';
-import { PassThrough, addAbortSignal } from 'stream';
+import { PassThrough, Writable, addAbortSignal } from 'stream';
 import { pipeline } from 'stream/promises';
 
 import { VerdaccioError, errorUtils } from '@verdaccio/core';
@@ -79,6 +79,15 @@ class MemoryHandler implements IPackageStorageManager {
         return onEnd(errorUtils.getInternalError('error on parse the metadata'));
       }
     });
+  }
+
+  public async writeTarballNext(pkgName: string, { signal }): Promise<Writable> {
+    // @ts-ignore
+    return new WritableStream({ write: () => {} });
+  }
+
+  public async hasFile(fileName: string): Promise<boolean> {
+    throw new Error('not  implemented');
   }
 
   public deletePackage(pkgName: string) {
