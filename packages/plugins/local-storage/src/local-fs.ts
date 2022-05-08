@@ -267,7 +267,7 @@ export default class LocalFS implements ILocalFSPackageManager {
     this._createFile(this._getStorage(packageJSONFileName), this._convertToString(manifest), cb);
   }
 
-  public async createPackagNext(name: string, manifest: Manifest): Promise<void> {
+  public async createPackageNext(name: string, manifest: Manifest): Promise<void> {
     debug('create a package %o', name);
 
     await this.createFileNext(

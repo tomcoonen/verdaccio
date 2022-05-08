@@ -12,6 +12,7 @@ import {
   IReadTarball,
   IUploadTarball,
   Logger,
+  Manifest,
   Package,
   PackageTransformer,
   ReadPackageCallback,
@@ -97,6 +98,10 @@ class MemoryHandler implements IPackageStorageManager {
 
   public removePackage() {
     return Promise.resolve();
+  }
+
+  public async createPackageNext(name: string, manifest: Manifest): Promise<void> {
+    return;
   }
 
   public createPackage(name: string, value: Package, cb: CallbackAction): void {

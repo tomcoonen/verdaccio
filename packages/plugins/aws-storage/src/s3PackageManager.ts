@@ -77,6 +77,10 @@ export default class S3PackageManager implements ILocalPackageManager {
     throw new Error('not  implemented');
   }
 
+  public async createPackageNext(name: string, manifest: Package): Promise<void> {
+    return;
+  }
+
   public updatePackage(
     name: string,
     updateHandler: Callback,

@@ -55,6 +55,10 @@ class GoogleCloudStorageHandler implements IPackageStorageManager {
     throw new Error('not  implemented');
   }
 
+  public async createPackageNext(name: string, manifest: Package): Promise<void> {
+    return;
+  }
+
   public updatePackage(
     name: string,
     updateHandler: StorageUpdateCallback,

@@ -72,7 +72,7 @@ declare module '@verdaccio/types' {
   } & CommonWebConf;
 
   interface Signatures {
-    keyid: string
+    keyid: string;
     sig: string;
   }
 
@@ -525,14 +525,19 @@ declare module '@verdaccio/types' {
 
   interface ILocalPackageManager {
     logger: Logger;
+    // Old list of methods, should be removed in the future
+
+    deletePackage(fileName: string): Promise<void>;
+    removePackage(): Promise<void>;
+
     // @deprecated use writeTarballNext
     writeTarball(pkgName: string): IUploadTarball;
     // @deprecated use readTarballNext
     readTarball(pkgName: string): IReadTarball;
+    // @deprecated use readPackageNext
     readPackage(fileName: string, callback: ReadPackageCallback): void;
+    // @deprecated use createPackageNext
     createPackage(pkgName: string, value: Package, cb: CallbackAction): void;
-    deletePackage(fileName: string): Promise<void>;
-    removePackage(): Promise<void>;
     // @deprecated use updatePackageNext
     updatePackage(
       pkgFileName: string,
@@ -546,11 +551,14 @@ declare module '@verdaccio/types' {
     //  next packages migration (this list is meant to replace the callback parent functions)
     updatePackageNext(
       packageName: string,
-      handleUpdate: (manifest: Manifest) => Promise<Package>
+      handleUpdate: (manifest: Manifest) => Promise<Manifest>
     ): Promise<Manifest>;
+    readPackageNext(name: string): Promise<Manifest>;
     savePackageNext(pkgName: string, value: Manifest): Promise<void>;
     readTarballNext(pkgName: string, { signal }): Promise<Readable>;
+    createPackageNext(name: string, manifest: Manifest): Promise<void>;
     writeTarballNext(tarballName: string, { signal }): Promise<Writable>;
+    // new methods
     hasFile(fileName: string): Promise<boolean>;
   }
 
