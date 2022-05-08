@@ -75,7 +75,7 @@ class Storage extends AbstractStorage {
       debug('look up remote for %o', name);
       await checkPackageRemote(
         name,
-        this._isAllowPublishOffline(),
+        this.isAllowPublishOffline(),
         this._syncUplinksMetadata.bind(this)
       );
       debug('publishing a package for %o', name);
@@ -101,7 +101,7 @@ class Storage extends AbstractStorage {
       debug('look up remote for %o', name);
       await checkPackageRemote(
         name,
-        this._isAllowPublishOffline(),
+        this.isAllowPublishOffline(),
         this._syncUplinksMetadata.bind(this)
       );
       debug('publishing a package for %o', name);
@@ -129,16 +129,6 @@ class Storage extends AbstractStorage {
   ): void {
     debug('add the version %o for package %o', version, name);
     this.localStorage.addVersion(name, version, metadata, tag, callback);
-  }
-
-  public async addVersionNext(
-    name: string,
-    version: string,
-    metadata: Version,
-    tag: StringValue
-  ): Promise<void> {
-    debug('add the version %o for package %o', version, name);
-    return this.localStorage.addVersionNext(name, version, metadata, tag);
   }
 
   /**

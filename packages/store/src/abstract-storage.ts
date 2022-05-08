@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-unused-vars */
 import assert from 'assert';
 import buildDebug from 'debug';
-import _ from 'lodash';
+import _, { isNil } from 'lodash';
 import { PassThrough, Readable, Stream, Transform, Writable } from 'stream';
 import { pipeline } from 'stream/promises';
 
@@ -19,6 +19,7 @@ import {
 import { logger } from '@verdaccio/logger';
 import { IProxy, ISyncUplinksOptions, ProxyList, ProxyStorage } from '@verdaccio/proxy';
 import {
+  Author,
   Callback,
   CallbackAction,
   Config,
@@ -36,16 +37,21 @@ import {
   TokenFilter,
   Version,
 } from '@verdaccio/types';
-import { createTarballHash, normalizeContributors } from '@verdaccio/utils';
+import { createTarballHash, getLatestVersion, normalizeContributors } from '@verdaccio/utils';
 
-import { PublishOptions, UpdateManifestOptions, isDeprecatedManifest } from '.';
+import {
+  PublishOptions,
+  UpdateManifestOptions,
+  cleanUpReadme,
+  isDeprecatedManifest,
+  tagVersion,
+} from '.';
 import { LocalStorage } from './local-storage';
 import { SearchManager } from './search';
 import { isPublishablePackage } from './star-utils';
 import {
   STORAGE,
   checkPackageLocal,
-  checkPackageRemote,
   cleanUpLinksRef,
   generatePackageTemplate,
   generateRevision,
@@ -141,19 +147,18 @@ class AbstractStorage {
     return await storage.readTarballNext(filename, { signal });
   }
 
+  /**
+   * Get a package local manifest
+   * @param name package name
+   * @returns local manifest
+   */
   public async getPackageLocalMetadata(name: string): Promise<Manifest> {
     const storage: IPackageStorage = this.getPrivatePackageStorage(name);
     debug('get package metadata for %o', name);
     if (typeof storage === 'undefined') {
-      // TODO: this might be a better an error to throw
-      // if storage is not there cannot be 404.
       throw errorUtils.getNotFound();
     }
 
-    return await this.readPackage(name, storage);
-  }
-
-  private async readPackage(name: string, storage: any): Promise<Package> {
     try {
       const result: Manifest = await storage.readPackageNext(name);
       return normalizePackage(result);
@@ -184,14 +189,6 @@ class AbstractStorage {
     });
 
     return stream;
-  }
-
-  public _isAllowPublishOffline(): boolean {
-    return (
-      typeof this.config.publish !== 'undefined' &&
-      _.isBoolean(this.config.publish.allow_offline) &&
-      this.config.publish.allow_offline
-    );
   }
 
   public readTokens(filter: TokenFilter): Promise<Token[]> {
@@ -300,20 +297,43 @@ class AbstractStorage {
   protected async publish(body: Manifest, options: PublishOptions): Promise<Writable> {
     const { name } = options;
     debug('publishing or updating a new version for %o', name);
-    const metadata = validatioUtils.validateMetadata(body, name);
 
+    // TODO: improve validation body
+    const isInvalidBodyFormat = false;
+
+    if (isInvalidBodyFormat) {
+      // npm is doing something strange again
+      // if this happens in normal circumstances, report it as a bug
+      debug('invalid body format');
+      logger.info(
+        { packageName: name },
+        `wrong package format on publish a package @{packageName}`
+      );
+      throw errorUtils.getBadRequest(API_ERROR.UNSUPORTED_REGISTRY_CALL);
+    }
+
+    const manifest: Manifest = { ...validatioUtils.validateMetadata(body, name) };
+    const { _attachments, versions } = manifest;
+    // at this point document is either created or existed before
+    const [firstAttachmentKey] = Object.keys(_attachments);
     // upload resources
-    const buffer = Buffer.from(
-      body._attachments['npm_test_pr_206-1.0.0.tgz'].data as string,
-      'base64'
-    );
+    const buffer = Buffer.from(body._attachments[firstAttachmentKey].data as string, 'base64');
 
     if (buffer.length === 0) {
       throw errorUtils.getBadData('refusing to accept zero-length file');
     }
 
+    try {
+      await this.addPackageLocalPackage(name);
+    } catch (err: any) {
+      if (err && err.status !== HTTP_STATUS.CONFLICT) {
+        debug('error on change or update a package with %o', err.message);
+        throw err;
+      }
+    }
+
     const readable = Readable.from(buffer);
-    const stream: Writable = await this.uploadTarball(name, 'npm_test_pr_206-1.0.0.tgz', {
+    const stream: Writable = await this.uploadTarball(name, firstAttachmentKey, {
       signal: options.signal,
     });
 
@@ -334,6 +354,195 @@ class AbstractStorage {
     }
 
     return stream;
+
+    // // after tarball has been successfully uploaded, we update the version
+    // const versionToPublish: string = Object.keys(versions)[0];
+    // // TODO: review why do this
+    // versions[versionToPublish].readme =
+    //   _.isNil(manifest.readme) === false ? String(manifest.readme) : '';
+
+    // try {
+    //   await this.addVersionNext(name, versionToPublish, versions[versionToPublish], null);
+    // } catch (err: any) {
+    //   debug('error on create a version for %o with error %o', name, err.message);
+    //   // TODO: remove tarball if add version fails
+    //   throw err;
+    // }
+  }
+
+  /**
+   * Add a new version to a package
+   * @param name package name
+   * @param version version
+   * @param metadata version metadata
+   * @param tag tag of the version
+   */
+  public async addVersionNext(
+    name: string,
+    version: string,
+    metadata: Version,
+    tag: StringValue
+  ): Promise<void> {
+    debug(`add version %s package for %s`, version, name);
+    await this.updatePackageNext(name, async (data: Manifest): Promise<Manifest> => {
+      debug('%s package is being updated', name);
+      // keep only one readme per package
+      data.readme = metadata.readme;
+      debug('%s` readme mutated', name);
+      // TODO: lodash remove
+      metadata = cleanUpReadme(metadata);
+      metadata.contributors = normalizeContributors(metadata.contributors as Author[]);
+      debug('%s` contributors normalized', name);
+      const hasVersion = data.versions[version] != null;
+      if (hasVersion) {
+        debug('%s version %s already exists', name, version);
+        throw errorUtils.getConflict();
+      }
+
+      // if uploaded tarball has a different shasum, it's very likely that we
+      // have some kind of error
+      if (validatioUtils.isObject(metadata.dist) && _.isString(metadata.dist.tarball)) {
+        const tarball = metadata.dist.tarball.replace(/.*\//, '');
+
+        if (validatioUtils.isObject(data._attachments[tarball])) {
+          if (
+            _.isNil(data._attachments[tarball].shasum) === false &&
+            _.isNil(metadata.dist.shasum) === false
+          ) {
+            if (data._attachments[tarball].shasum != metadata.dist.shasum) {
+              const errorMessage =
+                `shasum error, ` +
+                `${data._attachments[tarball].shasum} != ${metadata.dist.shasum}`;
+              throw errorUtils.getBadRequest(errorMessage);
+            }
+          }
+
+          const currentDate = new Date().toISOString();
+
+          // some old storage do not have this field #740
+          if (_.isNil(data.time)) {
+            data.time = {};
+          }
+
+          data.time['modified'] = currentDate;
+
+          if ('created' in data.time === false) {
+            data.time.created = currentDate;
+          }
+
+          data.time[version] = currentDate;
+          data._attachments[tarball].version = version;
+        }
+      }
+
+      data.versions[version] = metadata;
+      tagVersion(data, version, tag);
+
+      try {
+        debug('%s` add on database', name);
+        await this.localStorage.getStoragePlugin().add(name);
+      } catch (err: any) {
+        throw errorUtils.getBadData(err.message);
+      }
+      return data;
+    });
+  }
+
+  /**
+   *  Add a {name} package to a system
+      Function checks if package with the same name is available from uplinks.
+      If it isn't, we create package locally
+      Used storages: local (write) && uplinks
+   */
+  public async addPackageLocalPackage(name: string): Promise<void> {
+    try {
+      debug('add package for %o', name);
+      await checkPackageLocal(name, this.localStorage);
+      debug('look up remote for %o', name);
+
+      await this.checkPackageRemote(name, this.isAllowPublishOffline());
+      debug('publishing a package for %o', name);
+      // create an empty package
+      await this.createNewLocalCachePackage(name);
+    } catch (err: any) {
+      debug('error on add a package for %o with error %o', name, err);
+      throw err;
+    }
+  }
+
+  /**
+   * Create an empty new local cache package without versions.
+   * @param name name of the package
+   * @returns
+   */
+  private async createNewLocalCachePackage(name: string): Promise<void> {
+    const storage: IPackageStorage = this.getPrivatePackageStorage(name);
+
+    if (!storage) {
+      debug(`storage is missing for %o package cannot be added`, name);
+      throw errorUtils.getNotFound('this package cannot be added');
+    }
+
+    try {
+      await storage.createPackageNext(name, generatePackageTemplate(name));
+      return;
+    } catch (err: any) {
+      if (
+        _.isNull(err) === false &&
+        (err.code === STORAGE.FILE_EXIST_ERROR || err.code === HTTP_STATUS.CONFLICT)
+      ) {
+        debug(`error on creating a package for %o with error %o`, name, err.message);
+        throw errorUtils.getConflict();
+      }
+      return;
+    }
+  }
+
+  protected isAllowPublishOffline(): boolean {
+    return (
+      typeof this.config.publish !== 'undefined' &&
+      _.isBoolean(this.config.publish.allow_offline) &&
+      this.config.publish.allow_offline
+    );
+  }
+
+  /**
+   *
+   * @param name package name
+   * @param uplinksLook
+   * @returns
+   */
+  private async checkPackageRemote(name: string, uplinksLook: boolean): Promise<void> {
+    try {
+      // we provide a null manifest, thus the manifest returned will be the remote one
+      const [remoteManifest, upLinksErrors] = await this.syncUplinksMetadataNext(name, null, {
+        uplinksLook,
+      });
+
+      // checking package exist already
+      if (isNil(remoteManifest) === false) {
+        throw errorUtils.getConflict(API_ERROR.PACKAGE_EXIST);
+      }
+
+      for (let errorItem = 0; errorItem < upLinksErrors.length; errorItem++) {
+        // checking error
+        // if uplink fails with a status other than 404, we report failure
+        if (isNil(upLinksErrors[errorItem][0]) === false) {
+          if (upLinksErrors[errorItem][0].status !== HTTP_STATUS.NOT_FOUND) {
+            if (upLinksErrors) {
+              return;
+            }
+
+            throw errorUtils.getServiceUnavailable(API_ERROR.UPLINK_OFFLINE_PUBLISH);
+          }
+        }
+      }
+    } catch (err: any) {
+      if (err && err.status !== HTTP_STATUS.NOT_FOUND) {
+        throw err;
+      }
+      return;
+    }
   }
 
   private setDefaultRevision(json: Manifest): Manifest {
@@ -489,7 +698,7 @@ class AbstractStorage {
    */
   public async syncUplinksMetadataNext(
     name: string,
-    packageInfo: Manifest,
+    packageInfo: Manifest | null,
     options: ISyncUplinksOptions = {}
   ): Promise<[Manifest, any]> {
     let found = false;
@@ -547,6 +756,18 @@ class AbstractStorage {
     }
   }
 
+  /**
+   * Merge a manifest with a remote manifest.
+   *
+   * If the uplinks are not available, the local manifest is returned.
+   * If the uplinks are available, the local manifest is merged with the remote one.
+   *
+   *
+   * @param uplink uplink instance
+   * @param cachedManifest the local cached manifest
+   * @param options options
+   * @returns Returns a promise that resolves with the merged manifest.
+   */
   public async mergeCacheRemoteMetadata(
     uplink: IProxy,
     cachedManifest: Manifest,
@@ -559,6 +780,7 @@ class AbstractStorage {
     if (validatioUtils.isObject(upLinkMeta)) {
       const fetched = upLinkMeta.fetched;
 
+      // we check the uplink cache is fresh
       if (fetched && Date.now() - fetched < uplink.maxage) {
         return cachedManifest;
       }
@@ -569,10 +791,12 @@ class AbstractStorage {
     });
 
     try {
+      // get the latest metadata from the uplink
       const [remoteManifest, etag] = await uplink.getRemoteMetadataNext(
         _cacheManifest.name,
         remoteOptions
       );
+
       try {
         _cacheManifest = validatioUtils.validateMetadata(remoteManifest, _cacheManifest.name);
       } catch (err: any) {
@@ -588,8 +812,10 @@ class AbstractStorage {
       _cacheManifest = updateUpLinkMetadata(uplink.upname, _cacheManifest, etag);
       // merge time field cache and remote
       _cacheManifest = mergeUplinkTimeIntoLocalNext(_cacheManifest, remoteManifest);
+      // update the _uplinks field in the cache
       _cacheManifest = updateVersionsHiddenUpLinkNext(cachedManifest, uplink);
       try {
+        // merge versions from remote into the cache
         _cacheManifest = mergeVersions(_cacheManifest, remoteManifest);
         return _cacheManifest;
       } catch (err: any) {

@@ -126,7 +126,8 @@ class LocalStorage {
     return this.storagePlugin;
   }
 
-  public addPackage(name: string, pkg: Package, callback: Callback): void {
+  // @deprecated use abstract-storage.ts:addPackage
+  public addPackage(name: string, pkg: Manifest, callback: Callback): void {
     debug(`creating a package for`, name);
     const storage: any = this._getLocalStorage(name);
 
@@ -1120,7 +1121,7 @@ class LocalStorage {
    * Retrieve a wrapper that provide access to the package location.
    * @param {Object} pkgName package name.
    * @return {Object}
-   * @deprecated use Abstract Storage
+   * @deprecated use Abstract Storage:getPrivatePackageStorage
    */
   private _getLocalStorage(pkgName: string): IPackageStorage {
     debug('get local storage for %o', pkgName);

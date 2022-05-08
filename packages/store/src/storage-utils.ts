@@ -158,6 +158,7 @@ export function publishPackage(
 }
 
 // TODO: move to abstract storage
+// @deprecated use abstract.storage.ts:checkPackageRemote
 export function checkPackageRemote(
   name: string,
   isAllowPublishOffline: boolean,

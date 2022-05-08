@@ -65,6 +65,7 @@ export function validatePackage(name: string): boolean {
  * @param {*} manifest
  * @param {*} name
  * @return {Object} the object with additional properties as dist-tags ad versions
+ * FUTURE: rename to normalizeMetadata
  */
 export function validateMetadata(manifest: Package, name: string): Package {
   assert(isObject(manifest), 'not a json object');
