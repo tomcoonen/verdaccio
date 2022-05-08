@@ -146,7 +146,7 @@ export function publishPackageNext(storage: Storage): any {
     const metadata = req.body;
 
     try {
-      const stream = await storage.updateManifest(metadata, {
+      await storage.updateManifest(metadata, {
         name: packageName,
         signal: ac.signal,
         requestOptions: {
@@ -157,11 +157,9 @@ export function publishPackageNext(storage: Storage): any {
         },
       });
 
-      stream.on('success', () => {
-        return next({
-          ok: 'ok',
-          success: true,
-        });
+      return next({
+        ok: 'ok',
+        success: true,
       });
     } catch (err: any) {
       ac.abort();

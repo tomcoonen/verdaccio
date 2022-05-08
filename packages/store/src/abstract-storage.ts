@@ -251,11 +251,10 @@ class AbstractStorage {
     }
   }
 
-  public async updateManifest(manifest: Manifest, options: UpdateManifestOptions): Promise<Stream> {
-    let stream;
+  public async updateManifest(manifest: Manifest, options: UpdateManifestOptions): Promise<void> {
     if (isDeprecatedManifest(manifest)) {
       // if the manifest is deprecated, we need to update the package.json
-      stream = await this.deprecate(manifest, {
+      await this.deprecate(manifest, {
         ...options,
       });
     } else if (
@@ -263,38 +262,36 @@ class AbstractStorage {
       validatioUtils.isObject(manifest.users)
     ) {
       // if user request to apply a star to the manifest
-      stream = await this.star(manifest, {
+      await this.star(manifest, {
         ...options,
       });
     } else {
       // the last option is publishing a package
-      stream = await this.publish(manifest, {
+      await this.publish(manifest, {
         ...options,
       });
     }
-
-    return stream;
   }
 
-  protected async deprecate(body: Manifest, options: PublishOptions): Promise<Writable> {
+  protected async deprecate(body: Manifest, options: PublishOptions): Promise<void> {
     // // const storage: IPackageStorage = this.getPrivatePackageStorage(opname);
 
     // if (typeof storage === 'undefined') {
     //   throw errorUtils.getNotFound();
     // }
-    return new PassThrough();
+    return;
   }
 
-  protected async star(body: Manifest, options: PublishOptions): Promise<Writable> {
+  protected async star(body: Manifest, options: PublishOptions): Promise<void> {
     // // const storage: IPackageStorage = this.getPrivatePackageStorage(opname);
 
     // if (typeof storage === 'undefined') {
     //   throw errorUtils.getNotFound();
     // }
-    return new PassThrough();
+    return;
   }
 
-  protected async publish(body: Manifest, options: PublishOptions): Promise<Writable> {
+  protected async publish(body: Manifest, options: PublishOptions): Promise<void> {
     const { name } = options;
     debug('publishing or updating a new version for %o', name);
 
@@ -332,42 +329,158 @@ class AbstractStorage {
       }
     }
 
-    const readable = Readable.from(buffer);
-    const stream: Writable = await this.uploadTarball(name, firstAttachmentKey, {
-      signal: options.signal,
-    });
-
-    stream.on('error', function (err) {
-      debug(
-        'error on stream a tarball %o for %o with error %o',
-        'foo.tar.gz',
-        options.name,
-        err.message
-      );
-    });
-
+    // 1. upload the tarball to the storage
     try {
-      await pipeline(readable, stream, { signal: options.signal });
+      const readable = Readable.from(buffer);
+      await this.uploadTarball(name, firstAttachmentKey, readable, {
+        signal: options.signal,
+      });
     } catch (err: any) {
-      this.logger.error({ err: err.message }, 'error @{err} on publish a package ');
+      logger.error({ err: err.message }, 'upload tarball has failed: @{err}');
       throw err;
     }
 
-    return stream;
+    // 2. after tarball has been successfully uploaded, we update the version
+    try {
+      const versionToPublish: string = Object.keys(versions)[0];
+      // TODO: review why do this
+      versions[versionToPublish].readme =
+        _.isNil(manifest.readme) === false ? String(manifest.readme) : '';
+      await this.addVersionNext(name, versionToPublish, versions[versionToPublish], null);
+    } catch (err: any) {
+      logger.error({ err: err.message }, 'updated version has failed: @{err}');
+      debug('error on create a version for %o with error %o', name, err.message);
+      // TODO: remove tarball if add version fails
+      throw err;
+    }
 
-    // // after tarball has been successfully uploaded, we update the version
-    // const versionToPublish: string = Object.keys(versions)[0];
-    // // TODO: review why do this
-    // versions[versionToPublish].readme =
-    //   _.isNil(manifest.readme) === false ? String(manifest.readme) : '';
+    // 3. update and merge tags
+  }
 
-    // try {
-    //   await this.addVersionNext(name, versionToPublish, versions[versionToPublish], null);
-    // } catch (err: any) {
-    //   debug('error on create a version for %o with error %o', name, err.message);
-    //   // TODO: remove tarball if add version fails
-    //   throw err;
-    // }
+  /**
+   * Wrap uploadTarballAsStream into a promise.
+   * @param name package name
+   * @param fileName tarball name
+   * @param contentReadable content as readable stream
+   * @param options
+   * @returns
+   */
+  public async uploadTarball(
+    name: string,
+    fileName: string,
+    contentReadable: Readable,
+    { signal }
+  ): Promise<void> {
+    return new Promise((resolve, reject) => {
+      (async () => {
+        const stream: Writable = await this.uploadTarballAsStream(name, fileName, {
+          signal,
+        });
+
+        stream.on('error', (err) => {
+          debug(
+            'error on stream a tarball %o for %o with error %o',
+            'foo.tar.gz',
+            name,
+            err.message
+          );
+          this.logger.error({ err: err.message }, 'error @{err} on publish a package ');
+          reject(err);
+        });
+        stream.on('success', () => {
+          this.logger.debug(
+            { fileName, name },
+            'file @{fileName} for package @{name} fp has been succesfully uploaded.'
+          );
+          resolve();
+        });
+
+        try {
+          await pipeline(contentReadable, stream, { signal });
+        } catch (err: any) {
+          this.logger.error({ err: err.message }, 'error @{err} on publish a package ');
+          throw err;
+        }
+      })().catch((err) => {
+        reject(err);
+      });
+    });
+  }
+
+  public async uploadTarballAsStream(
+    pkgName: string,
+    filename: string,
+    { signal }
+  ): Promise<PassThrough> {
+    debug(`add a tarball for %o`, pkgName);
+    assert(validatioUtils.validateName(filename));
+
+    const shaOneHash = createTarballHash();
+    const transformHash = new Transform({
+      transform(chunk: any, encoding: string, callback: any): void {
+        // measure the length for validation reasons
+        shaOneHash.update(chunk);
+        callback(null, chunk);
+      },
+    });
+    const uploadStream = new PassThrough();
+    const storage = this.getPrivatePackageStorage(pkgName);
+
+    if (pkgName === PROTO_NAME) {
+      process.nextTick((): void => {
+        uploadStream.emit('error', errorUtils.getForbidden());
+      });
+      return uploadStream;
+    }
+
+    // FIXME: this condition will never met, storage is always defined
+    if (!storage) {
+      process.nextTick((): void => {
+        uploadStream.emit('error', "can't upload this package storage is missing");
+      });
+      return uploadStream;
+    }
+
+    const fileDoesExist = await storage.hasFile(filename);
+    if (fileDoesExist) {
+      process.nextTick((): void => {
+        uploadStream.emit('error', errorUtils.getConflict());
+      });
+    } else {
+      const localStorageWriteStream = await storage.writeTarballNext(filename, { signal });
+
+      localStorageWriteStream.on('open', async () => {
+        await pipeline(uploadStream, transformHash, localStorageWriteStream, { signal });
+      });
+
+      // once the file descriptor has been closed
+      localStorageWriteStream.on('close', async () => {
+        try {
+          // update the package metadata
+          await this.updatePackageNext(pkgName, async (data: Manifest): Promise<Manifest> => {
+            const newData: Manifest = { ...data };
+            newData._attachments[filename] = {
+              // TODO:  add integrity hash here
+              shasum: shaOneHash.digest('hex'),
+            };
+
+            return newData;
+          });
+          uploadStream.emit('success');
+        } catch (err) {
+          // FUTURE: if the update package fails, remove tarball to avoid left
+          // orphan tarballs
+          uploadStream.emit('error', err);
+        }
+      });
+
+      // something went wrong writing into the local storage
+      localStorageWriteStream.on('error', async (err: any) => {
+        uploadStream.emit('error', err);
+      });
+    }
+
+    return uploadStream;
   }
 
   /**
@@ -600,78 +713,6 @@ class AbstractStorage {
     }
   }
 
-  public async uploadTarball(pkgName: string, filename: string, { signal }): Promise<PassThrough> {
-    debug(`add a tarball for %o`, pkgName);
-    assert(validatioUtils.validateName(filename));
-
-    const shaOneHash = createTarballHash();
-    const transformHash = new Transform({
-      transform(chunk: any, encoding: string, callback: any): void {
-        // measure the length for validation reasons
-        shaOneHash.update(chunk);
-        callback(null, chunk);
-      },
-    });
-    const uploadStream = new PassThrough();
-    const storage = this.getPrivatePackageStorage(pkgName);
-
-    if (pkgName === PROTO_NAME) {
-      process.nextTick((): void => {
-        uploadStream.emit('error', errorUtils.getForbidden());
-      });
-      return uploadStream;
-    }
-
-    // FIXME: this condition will never met, storage is always defined
-    if (!storage) {
-      process.nextTick((): void => {
-        uploadStream.emit('error', "can't upload this package storage is missing");
-      });
-      return uploadStream;
-    }
-
-    const fileDoesExist = await storage.hasFile(filename);
-    if (fileDoesExist) {
-      process.nextTick((): void => {
-        uploadStream.emit('error', errorUtils.getConflict());
-      });
-    } else {
-      const localStorageWriteStream = await storage.writeTarballNext(filename, { signal });
-
-      localStorageWriteStream.on('open', async () => {
-        await pipeline(uploadStream, transformHash, localStorageWriteStream, { signal });
-      });
-
-      // once the file descriptor has been closed
-      localStorageWriteStream.on('close', async () => {
-        try {
-          // update the package metadata
-          await this.updatePackageNext(pkgName, async (data: Manifest): Promise<Manifest> => {
-            const newData: Manifest = { ...data };
-            newData._attachments[filename] = {
-              // TODO:  add integrity hash here
-              shasum: shaOneHash.digest('hex'),
-            };
-
-            return newData;
-          });
-          uploadStream.emit('success');
-        } catch (err) {
-          // FUTURE: if the update package fails, remove tarball to avoid left
-          // orphan tarballs
-          uploadStream.emit('error', err);
-        }
-      });
-
-      // something went wrong writing into the local storage
-      localStorageWriteStream.on('error', async (err: any) => {
-        uploadStream.emit('error', err);
-      });
-    }
-
-    return uploadStream;
-  }
-
   /**
    * Function fetches package metadata from uplinks and synchronizes it with local data
      if package is available locally, it MUST be provided in pkginfo.
@@ -700,7 +741,7 @@ class AbstractStorage {
     name: string,
     packageInfo: Manifest | null,
     options: ISyncUplinksOptions = {}
-  ): Promise<[Manifest, any]> {
+  ): Promise<[Manifest | null, any]> {
     let found = false;
     let syncManifest = {} as Manifest;
     const upLinks: Promise<Manifest>[] = [];
@@ -720,7 +761,7 @@ class AbstractStorage {
     }
 
     if (upLinks.length === 0) {
-      return [syncManifest, []];
+      return [null, []];
     }
 
     const errors: any[] = [];
