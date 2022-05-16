@@ -5,6 +5,7 @@ const ajv = new Ajv();
 // FIXME: this could extend from @verdaccio/types but we need
 // schemas from @verdaccio/types to be able to validate them
 interface Manifest {
+  name: string;
   versions: object;
   _attachments: object;
 }
@@ -12,10 +13,11 @@ interface Manifest {
 const schema: JSONSchemaType<Manifest> = {
   type: 'object',
   properties: {
+    name: { type: 'string' },
     versions: { type: 'object', maxProperties: 1 },
     _attachments: { type: 'object', maxProperties: 1 },
   },
-  required: ['versions', '_attachments'],
+  required: ['name', 'versions', '_attachments'],
   additionalProperties: true,
 };
 
@@ -24,7 +26,7 @@ const validate = ajv.compile(schema);
 
 /**
  * Validate if a manifest has the correct structure when a new package
- * is being created. The properties versions and _attachments must contain 1 element.
+ * is being created. The properties name, versions and _attachments must contain 1 element.
  * @param data a manifest object
  * @returns boolean
  */

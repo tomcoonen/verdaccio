@@ -78,15 +78,26 @@ describe('validatePublishSingleVersion', () => {
   test('should be valid', () => {
     expect(
       validatePublishSingleVersion({
+        name: 'foo-pkg',
         _attachments: { '2': {} },
         versions: { '1': {} },
       })
     ).toBeTruthy();
   });
 
+  test('should be invalid if name is missing', () => {
+    expect(
+      validatePublishSingleVersion({
+        _attachments: { '2': {} },
+        versions: { '1': {} },
+      })
+    ).toBeFalsy();
+  });
+
   test('should be invalid if _attachments is missing', () => {
     expect(
       validatePublishSingleVersion({
+        name: 'foo-pkg',
         versions: { '1': {} },
       })
     ).toBeFalsy();
@@ -95,6 +106,7 @@ describe('validatePublishSingleVersion', () => {
   test('should be invalid if versions is missing', () => {
     expect(
       validatePublishSingleVersion({
+        name: 'foo-pkg',
         _attachments: { '1': {} },
       })
     ).toBeFalsy();
@@ -103,6 +115,7 @@ describe('validatePublishSingleVersion', () => {
   test('should be invalid if versions is more than 1', () => {
     expect(
       validatePublishSingleVersion({
+        name: 'foo-pkg',
         versions: { '1': {}, '2': {} },
         _attachments: { '1': {} },
       })
@@ -112,6 +125,7 @@ describe('validatePublishSingleVersion', () => {
   test('should be invalid if _attachments is more than 1', () => {
     expect(
       validatePublishSingleVersion({
+        name: 'foo-pkg',
         _attachments: { '1': {}, '2': {} },
         versions: { '1': {} },
       })

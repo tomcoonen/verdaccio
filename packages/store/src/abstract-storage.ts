@@ -137,12 +137,12 @@ class AbstractStorage {
    * @returns
    */
   public async getLocalTarball(
-    name: string,
+    pkgName: string,
     filename: string,
     { signal }: { signal: AbortSignal }
   ): Promise<Readable> {
     assert(validatioUtils.validateName(filename));
-    const storage: IPackageStorage = this.getPrivatePackageStorage(name);
+    const storage: IPackageStorage = this.getPrivatePackageStorage(pkgName);
     if (typeof storage === 'undefined') {
       return this.createFailureStreamResponseNext();
     }
@@ -298,33 +298,18 @@ class AbstractStorage {
         ...options,
       });
     } else if (validatioUtils.validatePublishSingleVersion(manifest)) {
-      const { versions, name } = manifest;
-      // get the unique version available
-      const [versionToPublish] = Object.keys(versions);
-      // we check if package exist already locally
-      const storage: IPackageStorageManager = this.getPrivatePackageStorage(
-        name
-      ) as IPackageStorageManager;
-      const isAnUpdate = await storage.hasPackage();
-      debug('is updating the package %o', isAnUpdate);
       // if continue, the version to be published does not exist
-      if (isAnUpdate) {
-        // we update the package
-        return;
-      } else {
-        // we create a new package
-        const [mergedManifest, version] = await this.createPackageAndUpload(manifest, {
-          ...options,
-        });
-        // send notification of publication (notification step, non transactional)
-
-        try {
-          const { name } = mergedManifest;
-          await this.notify(mergedManifest, `${name}@${version}`);
-          logger.info('notify has been sent');
-        } catch (error: any) {
-          logger.error({ error: error.message }, 'notify batch service has failed: @{error}');
-        }
+      // we create a new package
+      const [mergedManifest, version] = await this.publishANewVersion(manifest, {
+        ...options,
+      });
+      // send notification of publication (notification step, non transactional)
+      try {
+        const { name } = mergedManifest;
+        await this.notify(mergedManifest, `${name}@${version}`);
+        logger.info('notify has been sent');
+      } catch (error: any) {
+        logger.error({ error: error.message }, 'notify batch service has failed: @{error}');
       }
     } else {
       debug('invalid body format');
@@ -335,12 +320,6 @@ class AbstractStorage {
       throw errorUtils.getBadRequest(API_ERROR.UNSUPORTED_REGISTRY_CALL);
     }
   }
-
-  /**
-   * Update manifest with new set of versions
-   * @param manifest
-   */
-  protected async updatePackageVersions(manifest: Manifest): Promise<void> {}
 
   protected async deprecate(body: Manifest, options: PublishOptions): Promise<void> {
     // // const storage: IPackageStorage = this.getPrivatePackageStorage(opname);
@@ -389,34 +368,35 @@ class AbstractStorage {
   }
 
   /**
-   * Publish a package
-   *
-   * - Create a new package if it doesn't exist.
-   * - Upload the tarball to the storage.
+   * Verify if the package exists in the local storage
+   * (the package refers to the package.json), directory would return false.
+   * @param pkgName package name
+   * @returns boolean
+   */
+  private async hasPackage(pkgName: string): Promise<boolean> {
+    const storage: IPackageStorage = this.getPrivatePackageStorage(pkgName);
+    if (typeof storage === 'undefined') {
+      throw errorUtils.getNotFound();
+    }
+    const hasPackage = await storage.hasPackage();
+    debug('has package %o for %o', pkgName, hasPackage);
+    return hasPackage;
+  }
+
+  /**
+   * Create a package
+   * This situation happens only of the package does not exist on the cache.
    *
    * @param body package metadata
    * @param options
    * @returns
    */
-  protected async createPackageAndUpload(
+  protected async publishANewVersion(
     body: Manifest,
     options: PublishOptions
   ): Promise<[Manifest, string]> {
     const { name } = options;
-    debug('publishing or updating a new version for %o', name);
-
-    // validate the body contains only 1 version and 1 attachment
-    const isValidBodyFormat = validatioUtils.validatePublishSingleVersion(body);
-
-    if (!isValidBodyFormat) {
-      debug('invalid body format');
-      logger.info(
-        { packageName: name },
-        `wrong package format on publish a package @{packageName}`
-      );
-      throw errorUtils.getBadRequest(API_ERROR.UNSUPORTED_REGISTRY_CALL);
-    }
-
+    debug('publishing a new package for %o', name);
     const manifest: Manifest = { ...validatioUtils.validateMetadata(body, name) };
     const { _attachments, versions } = manifest;
     // get the unique version available
@@ -442,14 +422,14 @@ class AbstractStorage {
         throw errorUtils.getConflict();
       }
 
-      await this.createNewLocalCachePackage(name);
-    } catch (err: any) {
-      if (err && err.status === HTTP_STATUS.CONFLICT) {
-        debug('error on change or update a package with %o', err.message);
-        logger.error({ err: err.message }, 'error on create package: @{err}');
-        throw err;
+      const hasPackageInStorage = await this.hasPackage(name);
+      if (!hasPackageInStorage) {
+        await this.createNewLocalCachePackage(name);
       }
-      // unless is a conflict, we can publish the package
+    } catch (err: any) {
+      debug('error on change or update a package with %o', err.message);
+      logger.error({ err: err.message }, 'error on create package: @{err}');
+      throw err;
     }
 
     // 1. after tarball has been successfully uploaded, we update the version
@@ -494,7 +474,10 @@ class AbstractStorage {
       throw err;
     }
 
-    logger.info({ packageName: name }, 'package has been published');
+    logger.info(
+      { name, version: versionToPublish },
+      'package @{package}@@{version} has been published'
+    );
 
     return [mergedManifest, versionToPublish];
   }
@@ -712,6 +695,7 @@ class AbstractStorage {
 
     try {
       await storage.createPackageNext(name, generatePackageTemplate(name));
+      this.logger.info({ name }, 'created new package @{name}');
       return;
     } catch (err: any) {
       if (

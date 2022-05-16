@@ -281,10 +281,10 @@ export default class LocalFS implements ILocalFSPackageManager {
     } catch (err: any) {
       if (err.code === noSuchFile) {
         debug('dir: %o does not exist %s', pathName, err?.code);
-        return true;
+        return false;
       } else {
         this.logger.error('error on verify a package exist %o', err);
-        return false;
+        throw errorUtils.getInternalError('error on verify a package exist');
       }
     }
   }
@@ -296,10 +296,11 @@ export default class LocalFS implements ILocalFSPackageManager {
    */
   public async createPackageNext(name: string, manifest: Manifest): Promise<void> {
     debug('create a a new package %o', name);
+    const pathPackage = this._getStorage(packageJSONFileName);
     try {
       // https://nodejs.org/dist/latest-v17.x/docs/api/fs.html#file-system-flags
       // 'wx': Like 'w' but fails if the path exists
-      await openPromise(name, 'wx');
+      await openPromise(pathPackage, 'wx');
     } catch (err: any) {
       // cannot override a pacakge that already exist
       if (err.code === 'EEXIST') {
@@ -308,10 +309,7 @@ export default class LocalFS implements ILocalFSPackageManager {
       }
     }
     // Create a new file and it´s folder if does not exist previously
-    await this.writeFileNext(
-      this._getStorage(packageJSONFileName),
-      this._convertToString(manifest)
-    );
+    await this.writeFileNext(pathPackage, this._convertToString(manifest));
   }
 
   // @deprecated use savePackageNext
