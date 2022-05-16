@@ -1,3 +1,4 @@
+import { validatePublishSingleVersion } from '../src/schemes/publish-manifest';
 import { isObject, validateName, validatePackage } from '../src/validation-utils';
 
 describe('validatePackage', () => {
@@ -70,5 +71,50 @@ describe('validateName', () => {
     expect(validateName('pk%20g')).toBeFalsy();
     expect(validateName('pk+g')).toBeFalsy();
     expect(validateName('pk:g')).toBeFalsy();
+  });
+});
+
+describe('validatePublishSingleVersion', () => {
+  test('should be valid', () => {
+    expect(
+      validatePublishSingleVersion({
+        _attachments: { '2': {} },
+        versions: { '1': {} },
+      })
+    ).toBeTruthy();
+  });
+
+  test('should be invalid if _attachments is missing', () => {
+    expect(
+      validatePublishSingleVersion({
+        versions: { '1': {} },
+      })
+    ).toBeFalsy();
+  });
+
+  test('should be invalid if versions is missing', () => {
+    expect(
+      validatePublishSingleVersion({
+        _attachments: { '1': {} },
+      })
+    ).toBeFalsy();
+  });
+
+  test('should be invalid if versions is more than 1', () => {
+    expect(
+      validatePublishSingleVersion({
+        versions: { '1': {}, '2': {} },
+        _attachments: { '1': {} },
+      })
+    ).toBeFalsy();
+  });
+
+  test('should be invalid if _attachments is more than 1', () => {
+    expect(
+      validatePublishSingleVersion({
+        _attachments: { '1': {}, '2': {} },
+        versions: { '1': {} },
+      })
+    ).toBeFalsy();
   });
 });

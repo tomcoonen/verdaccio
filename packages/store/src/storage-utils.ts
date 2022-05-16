@@ -261,6 +261,7 @@ export function isDifferentThanOne(versions: Versions | AttachMents): boolean {
   return Object.keys(versions).length !== 1;
 }
 
+// @deprecated use validationUtils.validatePublishNewPackage
 export function hasInvalidPublishBody(manifest: Pick<Package, '_attachments' | 'versions'>) {
   if (!manifest) {
     return false;

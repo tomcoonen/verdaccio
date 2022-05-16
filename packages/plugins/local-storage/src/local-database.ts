@@ -258,8 +258,8 @@ class LocalDatabase extends TokenActions implements IPluginStorage {
   private _getLocalStoragePath(storage: string | void): string {
     const globalConfigStorage = this.getStoragePath();
     if (_.isNil(globalConfigStorage)) {
-      this.logger.error('property storage in config.yaml is required for using  this plugin');
-      throw new Error('property storage in config.yaml is required for using  this plugin');
+      this.logger.error('property storage in config.yaml is required for using this plugin');
+      throw new Error('property storage in config.yaml is required for using this plugin');
     } else {
       if (typeof storage === 'string') {
         return path.join(globalConfigStorage as string, storage as string);

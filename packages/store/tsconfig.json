@@ -23,6 +23,9 @@
       "path": "../core/core"
     },
     {
+      "path": "../hooks"
+    },
+    {
       "path": "../loaders"
     },
     {

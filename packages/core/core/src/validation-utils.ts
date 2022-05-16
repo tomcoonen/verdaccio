@@ -1,8 +1,10 @@
 import assert from 'assert';
 
-import { Package } from '@verdaccio/types';
+import { Manifest } from '@verdaccio/types';
 
 import { DIST_TAGS } from './constants';
+
+export { validatePublishSingleVersion } from './schemes/publish-manifest';
 
 export function isPackageNameScoped(name: string): boolean {
   return name.startsWith('@');
@@ -67,7 +69,7 @@ export function validatePackage(name: string): boolean {
  * @return {Object} the object with additional properties as dist-tags ad versions
  * FUTURE: rename to normalizeMetadata
  */
-export function validateMetadata(manifest: Package, name: string): Package {
+export function validateMetadata(manifest: Manifest, name: string): Manifest {
   assert(isObject(manifest), 'not a json object');
   assert.strictEqual(manifest.name, name);
   const _manifest = { ...manifest };

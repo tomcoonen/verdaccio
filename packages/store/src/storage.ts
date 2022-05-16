@@ -2,7 +2,7 @@ import assert from 'assert';
 import async, { AsyncResultArrayCallback } from 'async';
 import buildDebug from 'debug';
 import _ from 'lodash';
-import { PassThrough, Writable } from 'stream';
+import { PassThrough } from 'stream';
 import { pipeline } from 'stream/promises';
 
 import { hasProxyTo } from '@verdaccio/config';
@@ -15,7 +15,7 @@ import {
   validatioUtils,
 } from '@verdaccio/core';
 import { ProxyStorage } from '@verdaccio/proxy';
-import { IProxy, ISyncUplinksOptions } from '@verdaccio/proxy';
+import { IProxy } from '@verdaccio/proxy';
 import { ReadTarball } from '@verdaccio/streams';
 import {
   convertDistRemoteToLocalTarballUrls,
@@ -44,15 +44,12 @@ import {
   cleanUpLinksRef,
   generatePackageTemplate,
   mergeUplinkTimeIntoLocal,
-  mergeUplinkTimeIntoLocalNext,
-  mergeVersions,
   normalizeDistTags,
   publishPackage,
-  updateUpLinkMetadata,
 } from './storage-utils';
 import { IGetPackageOptions, IGetPackageOptionsNext, ISyncUplinks } from './type';
 // import { StarBody, Users } from './type';
-import { updateVersionsHiddenUpLink, updateVersionsHiddenUpLinkNext } from './uplink-util';
+import { updateVersionsHiddenUpLink } from './uplink-util';
 import { getVersion } from './versions-utils';
 
 const debug = buildDebug('verdaccio:storage');
@@ -86,6 +83,11 @@ class Storage extends AbstractStorage {
       debug('error on add a package for %o with error %o', name, err);
       callback(err);
     }
+  }
+
+  public async updateVersionsManifest(name: string): Promise<void> {
+    // we check if package exist already locally
+    const manifest = await this.getPackageLocalMetadata(name);
   }
 
   /**
@@ -341,7 +343,6 @@ class Storage extends AbstractStorage {
       if (uplink.config.cache) {
         savestream = self.localStorage.addTarball(name, filename);
         savestream.on('success', () => {
-          console.log(`tarball ${filename} saved locally`);
           debug('tarball %s saved locally', filename);
         });
       }

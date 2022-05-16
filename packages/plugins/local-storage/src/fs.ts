@@ -16,7 +16,7 @@ const readFilePromise = async (path) => {
   return await readFile(path, 'utf8');
 };
 
-function fstatPromise(fd): Promise<fsCallback.Stats> {
+function fstatPromise(fd: number): Promise<fsCallback.Stats> {
   return new Promise((resolve, reject) => {
     fsCallback.fstat(fd, function (err, stats) {
       if (err) {

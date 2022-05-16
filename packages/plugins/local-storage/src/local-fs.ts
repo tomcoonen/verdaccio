@@ -19,6 +19,7 @@ import {
   readFilePromise,
   renamePromise,
   rmdirPromise,
+  statPromise,
   unlinkPromise,
   writeFilePromise,
 } from './fs';
@@ -267,10 +268,47 @@ export default class LocalFS implements ILocalFSPackageManager {
     this._createFile(this._getStorage(packageJSONFileName), this._convertToString(manifest), cb);
   }
 
-  public async createPackageNext(name: string, manifest: Manifest): Promise<void> {
-    debug('create a package %o', name);
+  /**
+   * Verify if the package exists already.
+   * @param name package name
+   * @returns
+   */
+  public async hasPackage(): Promise<boolean> {
+    const pathName: string = this._getStorage(packageJSONFileName);
+    try {
+      const stat = await statPromise(pathName);
+      return stat.isFile();
+    } catch (err: any) {
+      if (err.code === noSuchFile) {
+        debug('dir: %o does not exist %s', pathName, err?.code);
+        return true;
+      } else {
+        this.logger.error('error on verify a package exist %o', err);
+        return false;
+      }
+    }
+  }
 
-    await this.createFileNext(
+  /**
+   * Create a package in the local storage, if package already exist fails.
+   * @param name package name
+   * @param manifest package manifest
+   */
+  public async createPackageNext(name: string, manifest: Manifest): Promise<void> {
+    debug('create a a new package %o', name);
+    try {
+      // https://nodejs.org/dist/latest-v17.x/docs/api/fs.html#file-system-flags
+      // 'wx': Like 'w' but fails if the path exists
+      await openPromise(name, 'wx');
+    } catch (err: any) {
+      // cannot override a pacakge that already exist
+      if (err.code === 'EEXIST') {
+        debug('file %o cannot be created, it already exists: %o', name);
+        throw fSError(fileExist);
+      }
+    }
+    // Create a new file and it´s folder if does not exist previously
+    await this.writeFileNext(
       this._getStorage(packageJSONFileName),
       this._convertToString(manifest)
     );
@@ -326,7 +364,7 @@ export default class LocalFS implements ILocalFSPackageManager {
       });
   }
 
-  public async hasFile(fileName: string): Promise<boolean> {
+  public async hasTarball(fileName: string): Promise<boolean> {
     const pathName: string = this._getStorage(fileName);
     return new Promise((resolve) => {
       accessPromise(pathName)
@@ -473,8 +511,8 @@ export default class LocalFS implements ILocalFSPackageManager {
   public async readTarballNext(pkgName: string, { signal }): Promise<Readable> {
     const pathName: string = this._getStorage(pkgName);
     const readStream = addAbortSignal(signal, fs.createReadStream(pathName));
-    readStream.on('open', async function (fileDescriptor) {
-      const stats = await fstatPromise(fileDescriptor);
+    readStream.on('open', async function (fileDescriptorId: number) {
+      const stats = await fstatPromise(fileDescriptorId);
       readStream.emit('content-length', stats.size);
     });
     return readStream;
@@ -536,26 +574,6 @@ export default class LocalFS implements ILocalFSPackageManager {
 
       this._writeFile(name, contents, callback);
     });
-  }
-
-  /**
-   * Create a new file and it´s folder if does not exist previously
-   * @param name the name of the file
-   * @param contents the content of the file
-   */
-  private async createFileNext(name: string, contents: string): Promise<void> {
-    debug(' create a new file: %o', name);
-    try {
-      // https://nodejs.org/dist/latest-v17.x/docs/api/fs.html#file-system-flags
-      // 'wx': Like 'w' but fails if the path exists
-      await openPromise(name, 'wx');
-    } catch (err: any) {
-      if (err.code === 'EEXIST') {
-        debug('file %o cannot be created, it already exists: %o', name);
-        throw fSError(fileExist);
-      }
-    }
-    await this.writeFileNext(name, contents);
   }
 
   private async _readStorageFile(name: string): Promise<any> {

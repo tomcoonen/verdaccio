@@ -46,12 +46,14 @@ export default function (route: Router, auth: IAuth, storage: Storage): void {
       debug('init package by version');
       const name = req.params.package;
       let queryVersion = req.params.version;
+      const write = req.query.write === 'true';
       const requestOptions = {
         protocol: req.protocol,
         headers: req.headers as any,
         // FIXME: if we migrate to req.hostname, the port is not longer included.
         host: req.host,
         remoteAddress: req.socket.remoteAddress,
+        byPassCache: write,
       };
 
       try {

@@ -158,6 +158,7 @@ class LocalStorage {
 
   /**
    * Remove package with all it contents.
+   * @deprecated move this to storage or abastract-storage
    */
   public async removePackage(name: string): Promise<void> {
     debug('remove package %s', name);
@@ -168,6 +169,7 @@ class LocalStorage {
     }
 
     return new Promise((resolve, reject) => {
+      // FIXME: remove async from promise callback
       storage.readPackage(name, async (err, data: Package): Promise<void> => {
         if (_.isNil(err) === false) {
           if (err.code === STORAGE.NO_SUCH_FILE_ERROR || err.code === HTTP_STATUS.NOT_FOUND) {
@@ -397,7 +399,7 @@ class LocalStorage {
    * @param {*} metadata
    * @param {*} tag
    * @param {*} callback
-   * @deprecated use addVersionNext
+   * @deprecated use addVersionNext from abasract-storage
    */
   public addVersion(
     name: string,

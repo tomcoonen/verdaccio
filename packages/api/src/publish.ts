@@ -66,13 +66,27 @@ export default function publish(
    *
    * Example flow of unpublish.
    *
-   * npm http fetch GET 200 http://localhost:4873/@scope%2ftest1?write=true 1680ms
-   * npm http fetch PUT 201 http://localhost:4873/@scope%2ftest1/-rev/14-5d500cfce92f90fd
-   * 956606ms attempt #2
-   * npm http fetch GET 200 http://localhost:4873/@scope%2ftest1?write=true 1601ms
-   * npm http fetch DELETE 201 http://localhost:4873/@scope%2ftest1/-/test1-1.0.3.tgz/-rev/16
-   * -e11c8db282b2d992 19ms
+   * There are two possible flows:
    *
+   * - Remove all pacakges (entirely)
+   *   eg: npm unpublish package-name@* --force
+   *   eg: npm unpublish package-name  --force
+   *
+   * npm http fetch GET 200 http://localhost:4873/custom-name?write=true 1680ms
+   * npm http fetch DELETE 201 http://localhost:4873/custom-name/-/test1-1.0.3.tgz/-rev/16-e11c8db282b2d992 19ms
+   *
+   * - Remove a specific version
+   *   eg: npm unpublish package-name@1.0.0 --force
+   *
+   * Get fresh manifest
+   * npm http fetch GET 200 http://localhost:4873/custom-name?write=true 1680ms
+   * Update manifest without the version to be unpublished
+   * npm http fetch PUT 201 http://localhost:4873/custom-name/-rev/14-5d500cfce92f90fd 956606ms
+   * Get fresh manifest (revision should be different)
+   * npm http fetch GET 200 http://localhost:4873/custom-name?write=true 1601ms
+   * Remove the tarball
+   * npm http fetch DELETE 201 http://localhost:4873/custom-name/-/test1-1.0.3.tgz/-rev/16-e11c8db282b2d992 19ms
+   * 
    * 3. Star a package
    *
    * Permissions: start a package depends of the publish and unpublish permissions, there is no
@@ -91,6 +105,7 @@ export default function publish(
 	}
    *
    */
+  // DEPRECATED
   router.put(
     '/:package/:_rev?/:revision?',
     can('publish'),
@@ -99,9 +114,19 @@ export default function publish(
     publishPackage(storage, config, auth)
   );
 
+  // publish (update manifest)
   router.put(
-    '/new/:package/:_rev?/:revision?',
+    '/new/:package',
     can('publish'),
+    media(mime.getType('json')),
+    expectJson,
+    publishPackageNext(storage)
+  );
+
+  // unpublish a pacakge v6
+  router.put(
+    '/new/:package/-rev/:revision',
+    can('unpublish'),
     media(mime.getType('json')),
     expectJson,
     publishPackageNext(storage)
@@ -112,12 +137,18 @@ export default function publish(
    *
    * This scenario happens when the first call detect there is only one version remaining
    * in the metadata, then the client decides to DELETE the resource
-   * npm http fetch GET 304 http://localhost:4873/@scope%2ftest1?write=true 1076ms (from cache)
-     npm http fetch DELETE 201 http://localhost:4873/@scope%2ftest1/-rev/18-d8ebe3020bd4ac9c 22ms
+   * npm http fetch GET 304 http://localhost:4873/package-name?write=true 1076ms (from cache)
+   * npm http fetch DELETE 201 http://localhost:4873/package-name/-rev/18-d8ebe3020bd4ac9c 22ms
    */
-  router.delete('/:package/-rev/*', can('unpublish'), unPublishPackage(storage));
+  // deprecated
+  router.delete('/:package/-rev/:revision', can('unpublish'), unPublishPackage(storage));
+  // v6
+  router.delete('/new/:package/-rev/:revision', can('unpublish'), unPublishPackage(storage));
 
-  // removing a tarball
+  /*
+   Remove a tarball, this happens when npm unpublish a package unique version.
+   npm http fetch DELETE 201 http://localhost:4873/package-name/-rev/18-d8ebe3020bd4ac9c 22ms
+  */
   router.delete(
     '/:package/-/:filename/-rev/:revision',
     can('unpublish'),
@@ -135,19 +166,38 @@ export default function publish(
   );
 }
 
+export function unPublishVersions(storage: Storage) {
+  return async function (req: $RequestExtend, res: $ResponseExtend, next: $NextFunctionVer) {
+    const packageName = req.params.package;
+
+    logger.debug({ packageName }, `unpublishing versions for @{packageName}`);
+    try {
+      // await storage.updateManifest(packageName);
+    } catch (err) {
+      if (err) {
+        return next(err);
+      }
+    }
+    res.status(HTTP_STATUS.CREATED);
+    return next({ ok: 'ds' });
+  };
+}
+
 export function publishPackageNext(storage: Storage): any {
   return async function (
     req: $RequestExtend,
-    res: $ResponseExtend,
+    _res: $ResponseExtend,
     next: $NextFunctionVer
   ): Promise<void> {
     const ac = new AbortController();
     const packageName = req.params.package;
+    const { revision } = req.params;
     const metadata = req.body;
 
     try {
       await storage.updateManifest(metadata, {
         name: packageName,
+        revision,
         signal: ac.signal,
         requestOptions: {
           host: req.hostname,
@@ -163,11 +213,11 @@ export function publishPackageNext(storage: Storage): any {
       });
     } catch (err: any) {
       ac.abort();
-      logger.error({ err: err }, 'publish has failed: @{err}');
       next(err);
     }
   };
 }
+
 /**
  * Publish a package
  */
@@ -361,7 +411,7 @@ export function publishPackage(storage: Storage, config: Config, auth: IAuth): a
 }
 
 /**
- * un-publish a package
+ * un-publish a entire package package
  */
 export function unPublishPackage(storage: Storage) {
   return async function (req: $RequestExtend, res: $ResponseExtend, next: $NextFunctionVer) {

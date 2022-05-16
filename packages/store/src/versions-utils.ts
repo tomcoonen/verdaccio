@@ -59,6 +59,7 @@ export function sortVersionsAndFilterInvalid(listVersions: string[] /* logger */
  * @param {*} version
  * @param {*} tag
  * @return {Boolean} whether a package has been tagged
+ * @deprecated
  */
 export function tagVersion(data: Manifest, version: string, tag: StringValue): boolean {
   if (tag && data[DIST_TAGS][tag] !== version && semver.parse(version, true)) {
@@ -67,4 +68,20 @@ export function tagVersion(data: Manifest, version: string, tag: StringValue): b
     return true;
   }
   return false;
+}
+
+/**
+ *
+ * @param manifest
+ * @param version
+ * @param tag
+ * @returns
+ */
+export function tagVersionNext(manifest: Manifest, version: string, tag: StringValue): Manifest {
+  const data = { ...manifest };
+  if (tag && data[DIST_TAGS][tag] !== version && semver.parse(version, true)) {
+    // valid version - store
+    data[DIST_TAGS][tag] = version;
+  }
+  return data;
 }

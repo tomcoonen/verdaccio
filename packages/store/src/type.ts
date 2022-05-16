@@ -18,6 +18,8 @@ export type IGetPackageOptionsNext = {
   remoteUser?: RemoteUser;
   uplinksLook: boolean;
   requestOptions: RequestOptions;
+  // indicates to avoid any cache layer
+  byPassCache?: boolean;
 };
 
 // @deprecate remove this type
@@ -28,6 +30,7 @@ export type PublishOptions = {
 export type UpdateManifestOptions = {
   name: string;
   version?: string;
+  revision?: string;
   keepUpLinkData?: boolean;
   remoteUser?: RemoteUser;
   uplinksLook: boolean;

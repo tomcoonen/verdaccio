@@ -9,6 +9,7 @@ import { hasProxyTo } from '@verdaccio/config';
 import {
   API_ERROR,
   API_MESSAGE,
+  DIST_TAGS,
   HTTP_STATUS,
   errorUtils,
   pkgUtils,
@@ -26,6 +27,7 @@ import {
   DistFile,
   GenericBody,
   IPackageStorage,
+  IPackageStorageManager,
   IReadTarball,
   IUploadTarball,
   Logger,
@@ -45,6 +47,7 @@ import {
   cleanUpReadme,
   isDeprecatedManifest,
   tagVersion,
+  tagVersionNext,
 } from '.';
 import { LocalStorage } from './local-storage';
 import { SearchManager } from './search';
@@ -148,11 +151,14 @@ class AbstractStorage {
   }
 
   /**
-   * Get a package local manifest
+   * Get a package local manifest.
+   *
+   * Fails if package is not found.
    * @param name package name
+   * @param revision of package
    * @returns local manifest
    */
-  public async getPackageLocalMetadata(name: string): Promise<Manifest> {
+  public async getPackageLocalMetadata(name: string, revision?: string): Promise<Manifest> {
     const storage: IPackageStorage = this.getPrivatePackageStorage(name);
     debug('get package metadata for %o', name);
     if (typeof storage === 'undefined') {
@@ -201,6 +207,32 @@ class AbstractStorage {
 
   public deleteToken(user: string, tokenKey: string): Promise<any> {
     return this.localStorage.deleteToken(user, tokenKey);
+  }
+
+  /**
+   * Update a package and merge tags
+   * @param name package name
+   * @param tags list of dist-tags
+   */
+  public async mergeTagsNext(name: string, tags: MergeTags): Promise<Manifest> {
+    return await this.updatePackageNext(name, async (data: Manifest): Promise<Manifest> => {
+      let newData: Manifest = { ...data };
+      for (const tag of Object.keys(tags)) {
+        // this handle dist-tag rm command
+        if (_.isNull(tags[tag])) {
+          delete newData[DIST_TAGS][tag];
+          continue;
+        }
+
+        if (_.isNil(newData.versions[tags[tag]])) {
+          throw errorUtils.getNotFound(API_ERROR.VERSION_NOT_EXIST);
+        }
+        const version: string = tags[tag];
+        newData = tagVersionNext(newData, version, tag);
+      }
+
+      return newData;
+    });
   }
 
   /**
@@ -265,13 +297,50 @@ class AbstractStorage {
       await this.star(manifest, {
         ...options,
       });
+    } else if (validatioUtils.validatePublishSingleVersion(manifest)) {
+      const { versions, name } = manifest;
+      // get the unique version available
+      const [versionToPublish] = Object.keys(versions);
+      // we check if package exist already locally
+      const storage: IPackageStorageManager = this.getPrivatePackageStorage(
+        name
+      ) as IPackageStorageManager;
+      const isAnUpdate = await storage.hasPackage();
+      debug('is updating the package %o', isAnUpdate);
+      // if continue, the version to be published does not exist
+      if (isAnUpdate) {
+        // we update the package
+        return;
+      } else {
+        // we create a new package
+        const [mergedManifest, version] = await this.createPackageAndUpload(manifest, {
+          ...options,
+        });
+        // send notification of publication (notification step, non transactional)
+
+        try {
+          const { name } = mergedManifest;
+          await this.notify(mergedManifest, `${name}@${version}`);
+          logger.info('notify has been sent');
+        } catch (error: any) {
+          logger.error({ error: error.message }, 'notify batch service has failed: @{error}');
+        }
+      }
     } else {
-      // the last option is publishing a package
-      await this.publish(manifest, {
-        ...options,
-      });
+      debug('invalid body format');
+      logger.info(
+        { packageName: name },
+        `wrong package format on publish a package @{packageName}`
+      );
+      throw errorUtils.getBadRequest(API_ERROR.UNSUPORTED_REGISTRY_CALL);
     }
   }
+
+  /**
+   * Update manifest with new set of versions
+   * @param manifest
+   */
+  protected async updatePackageVersions(manifest: Manifest): Promise<void> {}
 
   protected async deprecate(body: Manifest, options: PublishOptions): Promise<void> {
     // // const storage: IPackageStorage = this.getPrivatePackageStorage(opname);
@@ -291,16 +360,55 @@ class AbstractStorage {
     return;
   }
 
-  protected async publish(body: Manifest, options: PublishOptions): Promise<void> {
+  /**
+   * Get local package, on fails return null.
+   * Errors are considered package not found.
+   * @param name
+   * @returns
+   */
+  private async getPackagelocalByNameNext(name: string): Promise<Manifest | null> {
+    try {
+      return await this.getPackageLocalMetadata(name);
+    } catch (err: any) {
+      debug('local package %s not found', name);
+      return null;
+    }
+  }
+
+  /**
+   * Convert tarball as string into a Buffer and validate the length.
+   * @param data the tarball data as string
+   * @returns
+   */
+  private getBufferManifest(data: string): Buffer {
+    const buffer = Buffer.from(data, 'base64');
+    if (buffer.length === 0) {
+      throw errorUtils.getBadData('refusing to accept zero-length file');
+    }
+    return buffer;
+  }
+
+  /**
+   * Publish a package
+   *
+   * - Create a new package if it doesn't exist.
+   * - Upload the tarball to the storage.
+   *
+   * @param body package metadata
+   * @param options
+   * @returns
+   */
+  protected async createPackageAndUpload(
+    body: Manifest,
+    options: PublishOptions
+  ): Promise<[Manifest, string]> {
     const { name } = options;
     debug('publishing or updating a new version for %o', name);
 
-    // TODO: improve validation body
-    const isInvalidBodyFormat = false;
+    // validate the body contains only 1 version and 1 attachment
+    const isValidBodyFormat = validatioUtils.validatePublishSingleVersion(body);
 
-    if (isInvalidBodyFormat) {
-      // npm is doing something strange again
-      // if this happens in normal circumstances, report it as a bug
+    if (!isValidBodyFormat) {
       debug('invalid body format');
       logger.info(
         { packageName: name },
@@ -311,38 +419,41 @@ class AbstractStorage {
 
     const manifest: Manifest = { ...validatioUtils.validateMetadata(body, name) };
     const { _attachments, versions } = manifest;
+    // get the unique version available
+    const [versionToPublish] = Object.keys(versions);
+
     // at this point document is either created or existed before
     const [firstAttachmentKey] = Object.keys(_attachments);
-    // upload resources
-    const buffer = Buffer.from(body._attachments[firstAttachmentKey].data as string, 'base64');
-
-    if (buffer.length === 0) {
-      throw errorUtils.getBadData('refusing to accept zero-length file');
-    }
+    const buffer = this.getBufferManifest(body._attachments[firstAttachmentKey].data as string);
 
     try {
-      await this.addPackageLocalPackage(name);
+      // we check if package exist already locally
+      const manifest = await this.getPackagelocalByNameNext(name);
+      // if continue, the version to be published does not exist
+      if (manifest?.versions[versionToPublish] != null) {
+        debug('%s version %s already exists', name, versionToPublish);
+        throw errorUtils.getConflict();
+      }
+
+      // if execution get here, package does not exist locally, we search upstream
+      const remoteManifest = await this.checkPackageRemote(name, this.isAllowPublishOffline());
+      if (remoteManifest?.versions[versionToPublish] != null) {
+        debug('%s version %s already exists', name, versionToPublish);
+        throw errorUtils.getConflict();
+      }
+
+      await this.createNewLocalCachePackage(name);
     } catch (err: any) {
-      if (err && err.status !== HTTP_STATUS.CONFLICT) {
+      if (err && err.status === HTTP_STATUS.CONFLICT) {
         debug('error on change or update a package with %o', err.message);
+        logger.error({ err: err.message }, 'error on create package: @{err}');
         throw err;
       }
+      // unless is a conflict, we can publish the package
     }
 
-    // 1. upload the tarball to the storage
+    // 1. after tarball has been successfully uploaded, we update the version
     try {
-      const readable = Readable.from(buffer);
-      await this.uploadTarball(name, firstAttachmentKey, readable, {
-        signal: options.signal,
-      });
-    } catch (err: any) {
-      logger.error({ err: err.message }, 'upload tarball has failed: @{err}');
-      throw err;
-    }
-
-    // 2. after tarball has been successfully uploaded, we update the version
-    try {
-      const versionToPublish: string = Object.keys(versions)[0];
       // TODO: review why do this
       versions[versionToPublish].readme =
         _.isNil(manifest.readme) === false ? String(manifest.readme) : '';
@@ -354,7 +465,43 @@ class AbstractStorage {
       throw err;
     }
 
-    // 3. update and merge tags
+    // 2. update and merge tags
+    let mergedManifest;
+    try {
+      // note: I could merge this with addVersionNext
+      // 1. add version
+      // 2. merge versions
+      // 3. upload tarball
+      // 3.update once to the storage (easy peasy)
+      mergedManifest = await this.mergeTagsNext(name, manifest[DIST_TAGS]);
+    } catch (err: any) {
+      logger.error({ err: err.message }, 'merge version has failed: @{err}');
+      debug('error on create a version for %o with error %o', name, err.message);
+      // TODO: undo if this fails
+      // 1. remove tarball
+      // 2. remove updated version
+      throw err;
+    }
+
+    // 3. upload the tarball to the storage
+    try {
+      const readable = Readable.from(buffer);
+      await this.uploadTarball(name, firstAttachmentKey, readable, {
+        signal: options.signal,
+      });
+    } catch (err: any) {
+      logger.error({ err: err.message }, 'upload tarball has failed: @{err}');
+      throw err;
+    }
+
+    logger.info({ packageName: name }, 'package has been published');
+
+    return [mergedManifest, versionToPublish];
+  }
+
+  // TODO: pending implementation
+  private async notify(manifest: Manifest, message: string): Promise<void> {
+    return;
   }
 
   /**
@@ -384,23 +531,17 @@ class AbstractStorage {
             name,
             err.message
           );
-          this.logger.error({ err: err.message }, 'error @{err} on publish a package ');
           reject(err);
         });
         stream.on('success', () => {
           this.logger.debug(
             { fileName, name },
-            'file @{fileName} for package @{name} fp has been succesfully uploaded.'
+            'file @{fileName} for package @{name} has been succesfully uploaded'
           );
           resolve();
         });
 
-        try {
-          await pipeline(contentReadable, stream, { signal });
-        } catch (err: any) {
-          this.logger.error({ err: err.message }, 'error @{err} on publish a package ');
-          throw err;
-        }
+        await pipeline(contentReadable, stream, { signal });
       })().catch((err) => {
         reject(err);
       });
@@ -441,7 +582,7 @@ class AbstractStorage {
       return uploadStream;
     }
 
-    const fileDoesExist = await storage.hasFile(filename);
+    const fileDoesExist = await storage.hasTarball(filename);
     if (fileDoesExist) {
       process.nextTick((): void => {
         uploadStream.emit('error', errorUtils.getConflict());
@@ -506,11 +647,6 @@ class AbstractStorage {
       metadata = cleanUpReadme(metadata);
       metadata.contributors = normalizeContributors(metadata.contributors as Author[]);
       debug('%s` contributors normalized', name);
-      const hasVersion = data.versions[version] != null;
-      if (hasVersion) {
-        debug('%s version %s already exists', name, version);
-        throw errorUtils.getConflict();
-      }
 
       // if uploaded tarball has a different shasum, it's very likely that we
       // have some kind of error
@@ -562,28 +698,6 @@ class AbstractStorage {
   }
 
   /**
-   *  Add a {name} package to a system
-      Function checks if package with the same name is available from uplinks.
-      If it isn't, we create package locally
-      Used storages: local (write) && uplinks
-   */
-  public async addPackageLocalPackage(name: string): Promise<void> {
-    try {
-      debug('add package for %o', name);
-      await checkPackageLocal(name, this.localStorage);
-      debug('look up remote for %o', name);
-
-      await this.checkPackageRemote(name, this.isAllowPublishOffline());
-      debug('publishing a package for %o', name);
-      // create an empty package
-      await this.createNewLocalCachePackage(name);
-    } catch (err: any) {
-      debug('error on add a package for %o with error %o', name, err);
-      throw err;
-    }
-  }
-
-  /**
    * Create an empty new local cache package without versions.
    * @param name name of the package
    * @returns
@@ -625,7 +739,7 @@ class AbstractStorage {
    * @param uplinksLook
    * @returns
    */
-  private async checkPackageRemote(name: string, uplinksLook: boolean): Promise<void> {
+  private async checkPackageRemote(name: string, uplinksLook: boolean): Promise<Manifest | null> {
     try {
       // we provide a null manifest, thus the manifest returned will be the remote one
       const [remoteManifest, upLinksErrors] = await this.syncUplinksMetadataNext(name, null, {
@@ -643,18 +757,19 @@ class AbstractStorage {
         if (isNil(upLinksErrors[errorItem][0]) === false) {
           if (upLinksErrors[errorItem][0].status !== HTTP_STATUS.NOT_FOUND) {
             if (upLinksErrors) {
-              return;
+              return null;
             }
 
             throw errorUtils.getServiceUnavailable(API_ERROR.UPLINK_OFFLINE_PUBLISH);
           }
         }
       }
+      return remoteManifest;
     } catch (err: any) {
       if (err && err.status !== HTTP_STATUS.NOT_FOUND) {
         throw err;
       }
-      return;
+      return null;
     }
   }
 
@@ -690,7 +805,7 @@ class AbstractStorage {
   private async updatePackageNext(
     name: string,
     updateHandler: (manifest: Manifest) => Promise<Manifest>
-  ): Promise<void> {
+  ): Promise<Manifest> {
     const storage: IPackageStorage = this.getPrivatePackageStorage(name);
 
     if (!storage) {
@@ -702,6 +817,7 @@ class AbstractStorage {
     // after correctly updated write to the storage
     try {
       await this.writePackageNext(name, normalizePackage(updatedManifest));
+      return updatedManifest;
     } catch (err: any) {
       if (err.code === resourceNotAvailable) {
         throw errorUtils.getInternalError('resource temporarily unavailable');
@@ -716,26 +832,26 @@ class AbstractStorage {
   /**
    * Function fetches package metadata from uplinks and synchronizes it with local data
      if package is available locally, it MUST be provided in pkginfo.
-     
-    Using this example: 
+
+    Using this example:
 
     "jquery":
       access: $all
       publish: $authenticated
       unpublish: $authenticated
       # two uplinks setup
-      proxy: ver npmjs  
+      proxy: ver npmjs
       # one uplink setup
-      proxy: npmjs    
+      proxy: npmjs
 
     A package requires uplinks syncronization if enables the proxy section, uplinks
     can be more than one, the more are the most slow request will take, the request
     are made in serie and if 1st call fails, the secon will be triggered, otherwise
     the 1st will reply and others will be discareded. The order is important.
 
-    Errors on upkinks are considered are, time outs, connection fails and http status 304, 
-    in that case the request returns empty body and we want ask next on the list if has fresh 
-    updates. 
+    Errors on upkinks are considered are, time outs, connection fails and http status 304,
+    in that case the request returns empty body and we want ask next on the list if has fresh
+    updates.
    */
   public async syncUplinksMetadataNext(
     name: string,

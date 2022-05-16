@@ -164,9 +164,8 @@ declare module '@verdaccio/types' {
   }
 
   interface AttachMentsItem {
-    content_type?: string;
-    // FIXME: should be mandatory, review
     data?: string;
+    content_type?: string;
     length?: number;
     shasum?: string;
     version?: string;
@@ -217,12 +216,12 @@ declare module '@verdaccio/types' {
   interface Manifest {
     _id?: string;
     name: string;
-    versions: Versions;
     'dist-tags': GenericBody;
     time: GenericBody;
     readme?: string;
     users?: PackageUsers;
     _distfiles: DistFiles;
+    versions: Versions;
     _attachments: AttachMents;
     _uplinks: UpLinks;
     _rev: string;
@@ -559,7 +558,10 @@ declare module '@verdaccio/types' {
     createPackageNext(name: string, manifest: Manifest): Promise<void>;
     writeTarballNext(tarballName: string, { signal }): Promise<Writable>;
     // new methods
-    hasFile(fileName: string): Promise<boolean>;
+    // verify if tarball exist in the storage
+    hasTarball(fileName: string): Promise<boolean>;
+    // verify if package exist in the storage
+    hasPackage(): Promise<boolean>;
   }
 
   interface TarballActions {

@@ -41,6 +41,7 @@
   "dependencies": {
     "@verdaccio/config": "workspace:6.0.0-6-next.14",
     "@verdaccio/core": "workspace:6.0.0-6-next.5",
+    "@verdaccio/hooks": "workspace:6.0.0-6-next.13",
     "@verdaccio/loaders": "workspace:6.0.0-6-next.12",
     "@verdaccio/local-storage": "workspace:11.0.0-6-next.12",
     "@verdaccio/logger": "workspace:6.0.0-6-next.11",

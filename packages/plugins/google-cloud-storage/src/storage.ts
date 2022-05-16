@@ -51,11 +51,19 @@ class GoogleCloudStorageHandler implements IPackageStorageManager {
     return new WritableStream({ write: () => {} });
   }
 
-  public async hasFile(fileName: string): Promise<boolean> {
+  public async hasTarball(fileName: string): Promise<boolean> {
     throw new Error('not  implemented');
+  }
+  public async hasPackage(): Promise<boolean> {
+    return false;
   }
 
   public async createPackageNext(name: string, manifest: Package): Promise<void> {
+    return;
+  }
+
+  public async readPackageNext(name: string): Promise<Package> {
+    // @ts-ignore
     return;
   }
 
