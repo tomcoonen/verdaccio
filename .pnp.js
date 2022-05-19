@@ -134,7 +134,7 @@ function $$SETUP_STATE(hydrateRuntimeState, basePath) {
             ["marked", "npm:4.0.16"],
             ["memoizee", "npm:0.4.15"],
             ["mime", "npm:3.0.0"],
-            ["minimatch", "npm:5.0.1"],
+            ["minimatch", "npm:5.1.0"],
             ["mkdirp", "npm:1.0.4"],
             ["mv", "npm:2.1.1"],
             ["nock", "npm:12.0.3"],
@@ -13833,10 +13833,10 @@ function $$SETUP_STATE(hydrateRuntimeState, basePath) {
           ],
           "linkType": "HARD",
         }],
-        ["npm:5.0.1", {
-          "packageLocation": "./.yarn/cache/minimatch-npm-5.0.1-612724f6f0-6554aca258.zip/node_modules/minimatch/",
+        ["npm:5.1.0", {
+          "packageLocation": "./.yarn/cache/minimatch-npm-5.1.0-34f6240621-256a349ac6.zip/node_modules/minimatch/",
           "packageDependencies": [
-            ["minimatch", "npm:5.0.1"],
+            ["minimatch", "npm:5.1.0"],
             ["brace-expansion", "npm:2.0.1"]
           ],
           "linkType": "HARD",
@@ -18216,7 +18216,7 @@ function $$SETUP_STATE(hydrateRuntimeState, basePath) {
             ["marked", "npm:4.0.16"],
             ["memoizee", "npm:0.4.15"],
             ["mime", "npm:3.0.0"],
-            ["minimatch", "npm:5.0.1"],
+            ["minimatch", "npm:5.1.0"],
             ["mkdirp", "npm:1.0.4"],
             ["mv", "npm:2.1.1"],
             ["nock", "npm:12.0.3"],
