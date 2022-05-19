@@ -8,7 +8,7 @@ import { MockAgent, setGlobalDispatcher } from 'undici';
 import { Config, parseConfigFile } from '@verdaccio/config';
 import { streamUtils } from '@verdaccio/core';
 
-import { ProxyStorage } from '../src/up-storage';
+import { ProxyStorage } from '../src';
 
 const getConf = (name) => path.join(__dirname, '/conf', name);
 

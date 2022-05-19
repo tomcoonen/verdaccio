@@ -4,7 +4,7 @@ import path from 'path';
 import { Config, parseConfigFile } from '@verdaccio/config';
 import { API_ERROR, HEADER_TYPE, HTTP_STATUS, VerdaccioError, errorUtils } from '@verdaccio/core';
 
-import { ProxyStorage } from '../src/up-storage';
+import { ProxyStorage } from '../src';
 
 const getConf = (name) => path.join(__dirname, '/conf', name);
 

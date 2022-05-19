@@ -1,4 +1,4 @@
-import { ProxyStorage } from '../src/up-storage';
+import { ProxyStorage } from '../src';
 
 require('@verdaccio/logger').setup([]);
 
