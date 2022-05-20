@@ -1,8 +1,16 @@
+import _ from 'lodash';
 import nock from 'nock';
 import path from 'path';
 
 import { Config, parseConfigFile } from '@verdaccio/config';
-import { API_ERROR, HEADER_TYPE, HTTP_STATUS, VerdaccioError, errorUtils } from '@verdaccio/core';
+import {
+  API_ERROR,
+  HEADERS,
+  HEADER_TYPE,
+  HTTP_STATUS,
+  VerdaccioError,
+  errorUtils,
+} from '@verdaccio/core';
 
 import { ProxyStorage } from '../src';
 
@@ -13,6 +21,23 @@ const mockInfo = jest.fn();
 const mockHttp = jest.fn();
 const mockError = jest.fn();
 const mockWarn = jest.fn();
+
+// mock to get the headers fixed value
+jest.mock('crypto', () => {
+  return {
+    randomBytes: (): { toString: () => string } => {
+      return {
+        toString: (): string => 'foo-random-bytes',
+      };
+    },
+    pseudoRandomBytes: (): { toString: () => string } => {
+      return {
+        toString: (): string => 'foo-phseudo-bytes',
+      };
+    },
+  };
+});
+
 jest.mock('@verdaccio/logger', () => {
   const originalLogger = jest.requireActual('@verdaccio/logger');
   return {
@@ -21,7 +46,7 @@ jest.mock('@verdaccio/logger', () => {
       child: () => ({
         debug: (arg) => mockDebug(arg),
         info: (arg) => mockInfo(arg),
-        http: (arg) => mockHttp(arg),
+        http: (arg, msg) => mockHttp(arg, msg),
         error: (arg) => mockError(arg),
         warn: (arg) => mockWarn(arg),
       }),
@@ -150,89 +175,6 @@ describe('proxy', () => {
         const stream = prox1.fetchTarball('https://registry.npmjs.org/jquery/-/jquery-0.0.1.tgz');
         stream.on('error', (response) => {
           expect(response).toEqual(errorUtils.getInternalError(API_ERROR.CONTENT_MISMATCH));
-          done();
-        });
-      });
-    });
-  });
-
-  describe('getRemoteMetadata', () => {
-    describe('basic requests', () => {
-      test('proxy call with etag', (done) => {
-        nock(domain)
-          .get('/jquery')
-          .reply(
-            200,
-            { body: 'test' },
-            {
-              etag: () => `_ref_4444`,
-            }
-          );
-        const prox1 = new ProxyStorage(defaultRequestOptions, conf);
-        prox1.getRemoteMetadata('jquery', {}, (_error, body, etag) => {
-          expect(etag).toEqual('_ref_4444');
-          expect(body).toEqual({ body: 'test' });
-          done();
-        });
-      });
-
-      test('proxy call with etag as option', (done) => {
-        nock(domain)
-          .get('/jquery')
-          .reply(
-            200,
-            { body: 'test' },
-            {
-              etag: () => `_ref_4444`,
-            }
-          );
-        const prox1 = new ProxyStorage(defaultRequestOptions, conf);
-        prox1.getRemoteMetadata('jquery', { etag: 'rev_3333' }, (_error, body, etag) => {
-          expect(etag).toEqual('_ref_4444');
-          expect(body).toEqual({ body: 'test' });
-          done();
-        });
-      });
-
-      test('proxy  not found', (done) => {
-        nock(domain).get('/jquery').reply(404);
-        const prox1 = new ProxyStorage(defaultRequestOptions, conf);
-        prox1.getRemoteMetadata('jquery', { etag: 'rev_3333' }, (error) => {
-          expect(error).toEqual(errorUtils.getNotFound(API_ERROR.NOT_PACKAGE_UPLINK));
-          done();
-        });
-      });
-    });
-
-    describe('error handling', () => {
-      test('reply with error', (done) => {
-        nock(domain).get('/jquery').replyWithError('something awful happened');
-        const prox1 = new ProxyStorage(defaultRequestOptions, conf);
-        prox1.getRemoteMetadata('jquery', {}, (error) => {
-          expect(error).toEqual(new Error('something awful happened'));
-          done();
-        });
-      });
-
-      test('reply with bad body json format', (done) => {
-        nock(domain).get('/jquery').reply(200, 'some-text');
-        const prox1 = new ProxyStorage(defaultRequestOptions, conf);
-        prox1.getRemoteMetadata('jquery', {}, (error) => {
-          expect(error).toEqual(new SyntaxError('Unexpected token s in JSON at position 0'));
-          done();
-        });
-      });
-
-      test('400 error proxy call', (done) => {
-        nock(domain).get('/jquery').reply(409);
-        const prox1 = new ProxyStorage(defaultRequestOptions, conf);
-        prox1.getRemoteMetadata('jquery', {}, (error) => {
-          expect(error.statusCode).toEqual(500);
-          expect(mockInfo).toHaveBeenCalledTimes(1);
-          expect(mockHttp).toHaveBeenCalledWith({
-            request: { method: 'GET', url: `${domain}/jquery` },
-            status: 409,
-          });
           done();
         });
       });

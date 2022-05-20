@@ -1,4 +1,3 @@
-/* global AbortController */
 import JSONStream from 'JSONStream';
 import buildDebug from 'debug';
 import fs from 'fs';
@@ -169,7 +168,7 @@ class ProxyStorage implements IProxy {
    * @param {*} options
    * @param {*} cb
    * @return {Request}
-   * @deprecated do no tuse
+   * @deprecated do not use
    */
   private request(options: any, cb?: Callback): Stream.Readable {
     let json;
@@ -553,6 +552,8 @@ class ProxyStorage implements IProxy {
     const uri = this.config.url + `/${encode(name)}`;
     debug('request uri for %s', uri);
     let response;
+    let responseLength = 0;
+    let retryCount = 0;
     try {
       response = await got(uri, {
         headers,
@@ -562,7 +563,43 @@ class ProxyStorage implements IProxy {
         // FIXME: this should be taken from construtor as priority
         retry: options?.retry,
         timeout: options?.timeout,
-      });
+        hooks: {
+          beforeRetry: [
+            // FUTURE: got 12.0.0, the option arg should be removed
+            (_options, error: any, count) => {
+              retryCount = count ?? 0;
+              this.logger.info(
+                {
+                  request: {
+                    method: method,
+                    url: uri,
+                  },
+                  retryCount,
+                },
+                "retry @{retryCount} req: '@{request.method} @{request.url}'"
+              );
+            },
+          ],
+        },
+      })
+        .on('response', (res) => {
+          const message = "@{!status}, req: '@{request.method} @{request.url}' (streaming)";
+          this.logger.http(
+            {
+              request: {
+                method: method,
+                url: uri,
+              },
+              status: _.isNull(res) === false ? res.statusCode : 'ERR',
+            },
+            message
+          );
+        })
+        .on('downloadProgress', (progress) => {
+          if (progress.total) {
+            responseLength = progress.total;
+          }
+        });
       const etag = response.headers.etag as string;
       const data = response.body;
 
@@ -573,6 +610,19 @@ class ProxyStorage implements IProxy {
       }
 
       debug('uri %s success', uri);
+      const message = "@{!status}, req: '@{request.method} @{request.url}'";
+      this.logger.http(
+        {
+          // if error is null/false change this to undefined so it wont log
+          request: { method: method, url: uri },
+          status: response.statusCode,
+          bytes: {
+            in: options?.json ? JSON.stringify(options?.json).length : 0,
+            out: responseLength || 0,
+          },
+        },
+        message
+      );
       return [data, etag];
     } catch (err: any) {
       debug('uri %s fail', uri);
@@ -662,7 +712,7 @@ class ProxyStorage implements IProxy {
         timeout: options?.timeout,
       });
 
-      readStream.on('request', async function (req) {
+      readStream.on('request', async function () {
         try {
           await pipeline(readStream, fetchStream);
         } catch (err: any) {
