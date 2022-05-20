@@ -1,7 +1,7 @@
 import JSONStream from 'JSONStream';
 import buildDebug from 'debug';
 import fs from 'fs';
-import got, { Headers as gotHeaders } from 'got';
+import got, { RequiredRetryOptions, Headers as gotHeaders } from 'got';
 import type { Agents, Options } from 'got';
 import type { Agent as AgentHTTP } from 'http';
 import type { Agent as AgentHTTPS } from 'https';
@@ -115,6 +115,7 @@ class ProxyStorage implements IProxy {
   // @ts-ignore
   public last_request_time: number | null;
   public strict_ssl: boolean;
+  private retry: Partial<RequiredRetryOptions> | number;
 
   /**
    * Constructor
@@ -161,6 +162,7 @@ class ProxyStorage implements IProxy {
     this.max_fails = Number(setConfig(this.config, 'max_fails', 2));
     this.fail_timeout = parseInterval(setConfig(this.config, 'fail_timeout', '5m'));
     this.strict_ssl = Boolean(setConfig(this.config, 'strict_ssl', true));
+    this.retry = { limit: this.max_fails || 2 };
   }
 
   /**
@@ -230,7 +232,6 @@ class ProxyStorage implements IProxy {
 
             if (options.json && res.statusCode < 300) {
               try {
-                // $FlowFixMe
                 body = JSON.parse(body.toString(CHARACTER_ENCODING.UTF8));
               } catch (_err: any) {
                 body = {};
@@ -564,7 +565,7 @@ class ProxyStorage implements IProxy {
         method,
         agent: this.agent,
         // FIXME: this should be taken from construtor as priority
-        retry: options?.retry,
+        retry: options?.retry || this.retry,
         timeout: options?.timeout,
         hooks: {
           afterResponse: [
