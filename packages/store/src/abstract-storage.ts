@@ -842,7 +842,7 @@ class AbstractStorage {
     packageInfo: Manifest | null,
     options: ISyncUplinksOptions = {}
   ): Promise<[Manifest | null, any]> {
-    let found = false;
+    let found = true;
     let syncManifest = {} as Manifest;
     const upLinks: Promise<Manifest>[] = [];
     const hasToLookIntoUplinks = _.isNil(options.uplinksLook) || options.uplinksLook;
@@ -850,6 +850,7 @@ class AbstractStorage {
     // ensure package has enough data
     if (_.isNil(packageInfo) || _.isEmpty(packageInfo)) {
       syncManifest = generatePackageTemplate(name);
+      found = false;
     } else {
       syncManifest = { ...packageInfo };
     }
@@ -931,46 +932,41 @@ class AbstractStorage {
       etag: upLinkMeta?.etag,
     });
 
-    try {
-      // get the latest metadata from the uplink
-      const [remoteManifest, etag] = await uplink.getRemoteMetadataNext(
-        _cacheManifest.name,
-        remoteOptions
-      );
+    // get the latest metadata from the uplink
+    const [remoteManifest, etag] = await uplink.getRemoteMetadataNext(
+      _cacheManifest.name,
+      remoteOptions
+    );
 
-      try {
-        _cacheManifest = validatioUtils.validateMetadata(remoteManifest, _cacheManifest.name);
-      } catch (err: any) {
-        this.logger.error(
-          {
-            err: err,
-          },
-          'package.json validating error @{!err?.message}\n@{err.stack}'
-        );
-        throw err;
-      }
-      // updates the _uplink metadata fields, cache, etc
-      _cacheManifest = updateUpLinkMetadata(uplink.upname, _cacheManifest, etag);
-      // merge time field cache and remote
-      _cacheManifest = mergeUplinkTimeIntoLocalNext(_cacheManifest, remoteManifest);
-      // update the _uplinks field in the cache
-      _cacheManifest = updateVersionsHiddenUpLinkNext(cachedManifest, uplink);
-      try {
-        // merge versions from remote into the cache
-        _cacheManifest = mergeVersions(_cacheManifest, remoteManifest);
-        return _cacheManifest;
-      } catch (err: any) {
-        this.logger.error(
-          {
-            err: err,
-          },
-          'package.json mergin has failed @{!err?.message}\n@{err.stack}'
-        );
-        throw err;
-      }
-    } catch (error: any) {
-      this.logger.error('merge uplinks data has failed');
-      throw error;
+    try {
+      _cacheManifest = validatioUtils.validateMetadata(remoteManifest, _cacheManifest.name);
+    } catch (err: any) {
+      this.logger.error(
+        {
+          err: err,
+        },
+        'package.json validating error @{!err?.message}\n@{err.stack}'
+      );
+      throw err;
+    }
+    // updates the _uplink metadata fields, cache, etc
+    _cacheManifest = updateUpLinkMetadata(uplink.upname, _cacheManifest, etag);
+    // merge time field cache and remote
+    _cacheManifest = mergeUplinkTimeIntoLocalNext(_cacheManifest, remoteManifest);
+    // update the _uplinks field in the cache
+    _cacheManifest = updateVersionsHiddenUpLinkNext(cachedManifest, uplink);
+    try {
+      // merge versions from remote into the cache
+      _cacheManifest = mergeVersions(_cacheManifest, remoteManifest);
+      return _cacheManifest;
+    } catch (err: any) {
+      this.logger.error(
+        {
+          err: err,
+        },
+        'package.json mergin has failed @{!err?.message}\n@{err.stack}'
+      );
+      throw err;
     }
   }
 

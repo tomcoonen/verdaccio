@@ -524,62 +524,46 @@ class Storage extends AbstractStorage {
   public async getPackageNext(options: IGetPackageOptionsNext): Promise<[Manifest, any[]]> {
     const { name } = options;
     debug('get package for %o', name);
+    let data: Manifest | void;
+
     try {
-      let data: Manifest;
-      try {
-        data = await this.getPackageLocalMetadata(name);
-      } catch (err: any) {
-        // we don't have package locally, so we need to fetch it from uplinks
-        if (err && (!err.status || err.status >= HTTP_STATUS.INTERNAL_ERROR)) {
-          throw err;
-        }
-      }
-
-      // time to sync with uplinks if we have any
-      debug('sync uplinks for %o', name);
-      // @ts-expect-error
-      return this._syncUplinksMetadataPackageNext(name, data, {
-        // this property should be removed soon
-        // @ts-ignore
-        req: options.req,
-        uplinksLook: options.uplinksLook,
-        keepUpLinkData: options.keepUpLinkData,
-      });
+      data = await this.getPackageLocalMetadata(name);
     } catch (err: any) {
-      this.logger.error(
-        { name, err: err.message },
-        'error on get package for @{name} with error @{err}'
-      );
-      throw err;
+      // we don't have package locally, so we need to fetch it from uplinks
+      if (err && (!err.status || err.status >= HTTP_STATUS.INTERNAL_ERROR)) {
+        throw err;
+      }
     }
-  }
 
-  private _syncUplinksMetadataPackageNext(
-    name: string,
-    data: Manifest,
-    { uplinksLook, keepUpLinkData, req }
-  ): Promise<[Manifest, any[]]> {
-    return new Promise((resolve, reject) => {
-      this._syncUplinksMetadata(
-        name,
-        data,
-        { req: req, uplinksLook },
-        function getPackageSynUpLinksCallback(err, result: Manifest, uplinkErrors): void {
-          if (err) {
-            debug('error on sync package for %o with error %o', name, err?.message);
-            return reject(err);
-          }
+    // time to sync with uplinks if we have any
+    debug('sync uplinks for %o', name);
+    const [remoteManifest, upLinksErrors] = await this.syncUplinksMetadataNext(
+      name,
+      data as Manifest,
+      {
+        uplinksLook: options.uplinksLook,
+        remoteAddress: options.requestOptions.remoteAddress,
+        // etag??
+      }
+    );
 
-          const normalizedPkg = Object.assign({}, result, {
-            ...normalizeDistTags(cleanUpLinksRef(result, keepUpLinkData)),
-            _attachments: {},
-          });
+    if (!remoteManifest && typeof data === 'undefined') {
+      throw errorUtils.getNotFound(`${API_ERROR.NOT_PACKAGE_UPLINK}: ${name}`);
+    }
 
-          debug('no. sync uplinks errors %o for %s', uplinkErrors?.length, name);
-          resolve([normalizedPkg, uplinkErrors]);
-        }
-      );
+    if (!remoteManifest) {
+      // no data on uplinks
+      return [data as Manifest, upLinksErrors];
+    }
+
+    const normalizedPkg = Object.assign({}, remoteManifest, {
+      // FIXME: clean up  mutation of cleanUpLinksRef
+      ...normalizeDistTags(cleanUpLinksRef(remoteManifest, options.keepUpLinkData)),
+      _attachments: {},
     });
+
+    debug('no. sync uplinks errors %o for %s', upLinksErrors?.length, name);
+    return [normalizedPkg, upLinksErrors];
   }
 
   /**

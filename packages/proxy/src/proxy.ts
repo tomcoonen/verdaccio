@@ -538,6 +538,10 @@ class ProxyStorage implements IProxy {
     name: string,
     options: ISyncUplinksOptions
   ): Promise<[Manifest, string]> {
+    if (this._ifRequestFailure()) {
+      throw errorUtils.getInternalError(API_ERROR.UPLINK_OFFLINE);
+    }
+
     // FUTURE: allow mix headers that comes from the client
     debug('get metadata for %s', name);
     let headers = this.getHeadersNext(options?.headers);
@@ -553,7 +557,6 @@ class ProxyStorage implements IProxy {
     debug('request uri for %s', uri);
     let response;
     let responseLength = 0;
-    let retryCount = 0;
     try {
       response = await got(uri, {
         headers,
@@ -564,25 +567,55 @@ class ProxyStorage implements IProxy {
         retry: options?.retry,
         timeout: options?.timeout,
         hooks: {
+          afterResponse: [
+            (afterResponse) => {
+              const code = afterResponse.statusCode;
+              if (code >= HTTP_STATUS.OK && code < HTTP_STATUS.MULTIPLE_CHOICES) {
+                if (this.failed_requests >= this.max_fails) {
+                  this.failed_requests = 0;
+                  this.logger.warn(
+                    {
+                      host: this.url.host,
+                    },
+                    'host @{host} is now online'
+                  );
+                }
+              }
+
+              return afterResponse;
+            },
+          ],
           beforeRetry: [
             // FUTURE: got 12.0.0, the option arg should be removed
             (_options, error: any, count) => {
-              retryCount = count ?? 0;
+              this.failed_requests = count ?? 0;
               this.logger.info(
                 {
                   request: {
                     method: method,
                     url: uri,
                   },
-                  retryCount,
+                  error: error.message,
+                  retryCount: this.failed_requests,
                 },
                 "retry @{retryCount} req: '@{request.method} @{request.url}'"
               );
+              if (this.failed_requests >= this.max_fails) {
+                this.logger.warn(
+                  {
+                    host: this.url.host,
+                  },
+                  'host @{host} is now offline'
+                );
+              }
             },
           ],
         },
       })
-        .on('response', (res) => {
+        .on('request', () => {
+          this.last_request_time = Date.now();
+        })
+        .on('response', (eventResponse) => {
           const message = "@{!status}, req: '@{request.method} @{request.url}' (streaming)";
           this.logger.http(
             {
@@ -590,7 +623,7 @@ class ProxyStorage implements IProxy {
                 method: method,
                 url: uri,
               },
-              status: _.isNull(res) === false ? res.statusCode : 'ERR',
+              status: _.isNull(eventResponse) === false ? eventResponse.statusCode : 'ERR',
             },
             message
           );
@@ -947,7 +980,6 @@ class ProxyStorage implements IProxy {
    * If the request failure.
    * @return {boolean}
    * @private
-   * @deprecated dont use
    */
   private _ifRequestFailure(): boolean {
     return (

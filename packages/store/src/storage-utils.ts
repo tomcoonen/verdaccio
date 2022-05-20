@@ -107,7 +107,7 @@ export const WHITELIST = [
   'users',
 ];
 
-export function cleanUpLinksRef(result: Package, keepUpLinkData?: boolean): Package {
+export function cleanUpLinksRef(result: Manifest, keepUpLinkData?: boolean): Manifest {
   const propertyToKeep = [...WHITELIST];
   if (keepUpLinkData === true) {
     propertyToKeep.push('_uplinks');

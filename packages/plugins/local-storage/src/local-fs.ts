@@ -334,8 +334,10 @@ export default class LocalFS implements ILocalFSPackageManager {
       debug('read storage file %o has succeed', name);
       return data;
     } catch (err: any) {
-      debug('parse error');
-      this.logger.error({ err, name }, 'error @{err.message}  on parse @{name}');
+      if (err.code !== noSuchFile) {
+        debug('parse error');
+        this.logger.error({ err, name }, 'error @{err.message}  on parse @{name}');
+      }
       throw err;
     }
   }
