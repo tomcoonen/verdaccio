@@ -2,7 +2,7 @@ import { ProxyStorage } from '../src';
 
 require('@verdaccio/logger').setup([]);
 
-function setupProxy(host, uplinkConf, appConfig) {
+function getProxyInstance(host, uplinkConf, appConfig) {
   uplinkConf.url = host;
 
   return new ProxyStorage(uplinkConf, appConfig);
@@ -11,14 +11,14 @@ function setupProxy(host, uplinkConf, appConfig) {
 describe('Use proxy', () => {
   describe('basic tets', () => {
     test('should do not define proxy', () => {
-      const x = setupProxy('http://registry.domain.org', {}, {});
+      const x = getProxyInstance('http://registry.domain.org', {}, {});
 
       expect(x.proxy).toEqual(undefined);
     });
 
     test('uplink configuration should take priority', () => {
       expect(
-        setupProxy(
+        getProxyInstance(
           'http://registry.domain.org',
           { http_proxy: 'http:\\registry.local.org' },
           { http_proxy: 'registry.domain.org' }
@@ -28,15 +28,18 @@ describe('Use proxy', () => {
 
     test('global configuration should be used', () => {
       expect(
-        setupProxy('http://registry.some.org', {}, { http_proxy: 'http://registry.domain.org' })
-          .proxy
+        getProxyInstance(
+          'http://registry.some.org',
+          {},
+          { http_proxy: 'http://registry.domain.org' }
+        ).proxy
       ).toEqual('http://registry.domain.org');
     });
   });
 
   describe('no_proxy invalid cases', () => {
     test('no_proxy is null', () => {
-      let x = setupProxy(
+      let x = getProxyInstance(
         'http://x/x',
         { http_proxy: 'http:\\registry.local.org', no_proxy: null },
         {}
@@ -45,7 +48,7 @@ describe('Use proxy', () => {
     });
 
     test('no_proxy is empty array', () => {
-      let x = setupProxy(
+      let x = getProxyInstance(
         'http://x/x',
         { http_proxy: 'http:\\registry.local.org', no_proxy: [] },
         {}
@@ -54,7 +57,7 @@ describe('Use proxy', () => {
     });
 
     test('no_proxy is empty object', () => {
-      let x = setupProxy(
+      let x = getProxyInstance(
         'http://x/x',
         { http_proxy: 'http:\\registry.local.org', no_proxy: '' },
         {}
@@ -63,7 +66,7 @@ describe('Use proxy', () => {
     });
 
     test('no_proxy - simple/include', () => {
-      let x = setupProxy(
+      let x = getProxyInstance(
         'http://localhost',
         { http_proxy: 'http:\\registry.local.org' },
         { no_proxy: 'localhost' }
@@ -73,7 +76,7 @@ describe('Use proxy', () => {
     });
 
     test('no_proxy - simple/not', () => {
-      let x = setupProxy(
+      let x = getProxyInstance(
         'http://localhost',
         { http_proxy: 'http:\\registry.local.org' },
         { no_proxy: 'blah' }
@@ -83,7 +86,7 @@ describe('Use proxy', () => {
     });
 
     test('no_proxy is boolean', () => {
-      let x = setupProxy(
+      let x = getProxyInstance(
         'http://registry.some.domain',
         { http_proxy: 'http:\\registry.local.org', no_proxy: false },
         {}
@@ -94,7 +97,7 @@ describe('Use proxy', () => {
 
   describe('no_proxy override http_proxy use cases', () => {
     test('no_proxy - various, single string', () => {
-      let x = setupProxy(
+      let x = getProxyInstance(
         'http://blahblah',
         { http_proxy: 'http:\\registry.local.org' },
         { no_proxy: 'blah' }
@@ -103,7 +106,7 @@ describe('Use proxy', () => {
       expect(x.proxy).toEqual('http:\\registry.local.org');
     });
     test('should disable proxy if match hostname', () => {
-      let x = setupProxy(
+      let x = getProxyInstance(
         'http://registry.local.org',
         {},
         { http_proxy: 'http:\\registry.local.org', no_proxy: 'registry.local.org' }
@@ -111,7 +114,7 @@ describe('Use proxy', () => {
       expect(x.proxy).toEqual(undefined);
     });
     test('should not override http_proxy if domain does not match', () => {
-      let x = setupProxy(
+      let x = getProxyInstance(
         'http://blahblah',
         {},
         { http_proxy: 'http://registry.local.org', no_proxy: '.blah' }
@@ -119,15 +122,15 @@ describe('Use proxy', () => {
       expect(x.proxy).toEqual('http://registry.local.org');
     });
     test('should override http_proxy if match domain no_proxy', () => {
-      let x = setupProxy('http://blah.blah', { http_proxy: '123', no_proxy: '.blah' }, {});
+      let x = getProxyInstance('http://blah.blah', { http_proxy: '123', no_proxy: '.blah' }, {});
       expect(x.proxy).toEqual(undefined);
     });
     test('should override http_proxy due no_proxy match with hostname', () => {
-      let x = setupProxy('http://blah', { http_proxy: '123', no_proxy: '.blah' }, {});
+      let x = getProxyInstance('http://blah', { http_proxy: '123', no_proxy: '.blah' }, {});
       expect(x.proxy).toEqual(undefined);
     });
     test('should not override http_proxy if no_proxy does not match', () => {
-      let x = setupProxy(
+      let x = getProxyInstance(
         'http://blahh',
         { http_proxy: 'http://registry.local.org', no_proxy: 'blah' },
         {}
@@ -137,7 +140,7 @@ describe('Use proxy', () => {
   });
   describe('no_proxy as array of domains', () => {
     test('should not override http_proxy if not match domain', () => {
-      let x = setupProxy(
+      let x = getProxyInstance(
         'http://blahblah',
         { http_proxy: 'http:\\registry.local.org' },
         { no_proxy: 'foo,bar,blah' }
@@ -146,7 +149,7 @@ describe('Use proxy', () => {
       expect(x.proxy).toEqual('http:\\registry.local.org');
     });
     test('should disable proxy if match domain', () => {
-      let x = setupProxy(
+      let x = getProxyInstance(
         'http://blah.blah',
         { http_proxy: 'http:\\registry.local.org' },
         { no_proxy: 'foo,bar,blah' }
@@ -155,7 +158,7 @@ describe('Use proxy', () => {
     });
 
     test('disable proxy if match domain .foo', () => {
-      let x = setupProxy(
+      let x = getProxyInstance(
         'http://blah.foo',
         { http_proxy: 'http:\\registry.local.org' },
         { no_proxy: 'foo,bar,blah' }
@@ -163,7 +166,7 @@ describe('Use proxy', () => {
       expect(x.proxy).toEqual(undefined);
     });
     test('should not disable http_proxy if not match domain', () => {
-      let x = setupProxy(
+      let x = getProxyInstance(
         'http://foo.baz',
         { http_proxy: 'http:\\registry.local.org' },
         { no_proxy: 'foo,bar,blah' }
@@ -171,7 +174,7 @@ describe('Use proxy', () => {
       expect(x.proxy).toEqual('http:\\registry.local.org');
     });
     test('no_proxy should not find match no_proxy as array invalid domains', () => {
-      let x = setupProxy(
+      let x = getProxyInstance(
         'http://blahblah',
         { http_proxy: 'http:\\registry.local.org' },
         { no_proxy: ['foo', 'bar', 'blah'] }
@@ -179,7 +182,7 @@ describe('Use proxy', () => {
       expect(x.proxy).toEqual('http:\\registry.local.org');
     });
     test('no_proxy should find match no_proxy as array valid domains', () => {
-      let x = setupProxy(
+      let x = getProxyInstance(
         'http://blah.blah',
         { http_proxy: 'http:\\registry.local.org' },
         { no_proxy: ['foo', 'bar', 'blah'] }
@@ -190,26 +193,38 @@ describe('Use proxy', () => {
 
   describe('no_proxy with ports', () => {
     test('no_proxy - hostport', () => {
-      let x = setupProxy('http://localhost:80', { http_proxy: '123' }, { no_proxy: 'localhost' });
+      let x = getProxyInstance(
+        'http://localhost:80',
+        { http_proxy: '123' },
+        { no_proxy: 'localhost' }
+      );
 
       expect(x.proxy).toEqual(undefined);
-      x = setupProxy('http://localhost:8080', { http_proxy: '123' }, { no_proxy: 'localhost' });
+      x = getProxyInstance(
+        'http://localhost:8080',
+        { http_proxy: '123' },
+        { no_proxy: 'localhost' }
+      );
       expect(x.proxy).toEqual(undefined);
     });
   });
 
   describe('no_proxy with https match', () => {
     test('should not override if https_proxy is defined', () => {
-      let x = setupProxy('https://something', { http_proxy: '123' }, {});
+      let x = getProxyInstance('https://something', { http_proxy: '123' }, {});
 
       expect(x.proxy).toEqual(undefined);
     });
     test('should define proxy if https_proxy match', () => {
-      let x = setupProxy('https://something', { https_proxy: 'https://registry.local.org' }, {});
+      let x = getProxyInstance(
+        'https://something',
+        { https_proxy: 'https://registry.local.org' },
+        {}
+      );
       expect(x.proxy).toEqual('https://registry.local.org');
     });
     test('should match https_proxy if https protocol match', () => {
-      let x = setupProxy(
+      let x = getProxyInstance(
         'https://something',
         { http_proxy: 'http://registry.local.org', https_proxy: 'https://registry.local.org' },
         {}

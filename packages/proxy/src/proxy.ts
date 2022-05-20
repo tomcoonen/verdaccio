@@ -3,10 +3,7 @@ import buildDebug from 'debug';
 import fs from 'fs';
 import got, { RequiredRetryOptions, Headers as gotHeaders } from 'got';
 import type { Agents, Options } from 'got';
-import type { Agent as AgentHTTP } from 'http';
-import type { Agent as AgentHTTPS } from 'https';
 import _ from 'lodash';
-import ProxyAgent from 'proxy-agent';
 import requestDeprecated from 'request';
 import Stream, { PassThrough, Readable } from 'stream';
 import { pipeline } from 'stream/promises';
@@ -31,6 +28,7 @@ import { Manifest } from '@verdaccio/types';
 import { Callback, Config, IReadTarball, Logger, UpLinkConf } from '@verdaccio/types';
 import { buildToken } from '@verdaccio/utils';
 
+import CustomAgents, { AgentOptionsConf } from './agent';
 import { parseInterval } from './proxy-utils';
 
 const LoggerApi = require('@verdaccio/logger');
@@ -47,7 +45,7 @@ const contentTypeAccept = `${jsonContentType};`;
 /**
  * Just a helper (`config[key] || default` doesn't work because of zeroes)
  */
-const setConfig = (config, key, def): string => {
+const setConfig = (config: UpLinkConfLocal, key: string, def): string => {
   return _.isNil(config[key]) === false ? config[key] : def;
 };
 
@@ -106,23 +104,18 @@ class ProxyStorage implements IProxy {
   public timeout: number;
   public max_fails: number;
   public fail_timeout: number;
-  public agent_options: any;
+  public agent_options: AgentOptionsConf;
   // FIXME: upname is assigned to each instance
   // @ts-ignore
   public upname: string;
   public proxy: string | undefined;
-  private agent: Agents | undefined;
+  private agent: Agents;
   // @ts-ignore
   public last_request_time: number | null;
   public strict_ssl: boolean;
   private retry: Partial<RequiredRetryOptions> | number;
 
-  /**
-   * Constructor
-   * @param {*} config
-   * @param {*} mainConfig
-   */
-  public constructor(config: UpLinkConfLocal, mainConfig: Config) {
+  public constructor(config: UpLinkConfLocal, mainConfig: Config, agent?: Agents) {
     this.config = config;
     this.failed_requests = 0;
     this.userAgent = mainConfig.user_agent;
@@ -133,16 +126,11 @@ class ProxyStorage implements IProxy {
       keepAlive: true,
       maxSockets: 40,
       maxFreeSockets: 10,
-    });
+    }) as AgentOptionsConf;
     this.url = new URL(this.config.url);
     const isHTTPS = this.url.protocol === 'https:';
     this._setupProxy(this.url.hostname, config, mainConfig, isHTTPS);
-    if (typeof this.proxy === 'string') {
-      // TODO: pending hook agent_options options
-      this.agent = isHTTPS
-        ? { https: new ProxyAgent(this.proxy) as AgentHTTPS }
-        : { http: new ProxyAgent(this.proxy) as AgentHTTP };
-    }
+    this.agent = agent ?? this.getAgent();
     this.config.url = this.config.url.replace(/\/$/, '');
 
     if (this.config.timeout && Number(this.config.timeout) >= 1000) {
@@ -163,6 +151,15 @@ class ProxyStorage implements IProxy {
     this.fail_timeout = parseInterval(setConfig(this.config, 'fail_timeout', '5m'));
     this.strict_ssl = Boolean(setConfig(this.config, 'strict_ssl', true));
     this.retry = { limit: this.max_fails || 2 };
+  }
+
+  private getAgent() {
+    if (!this.agent) {
+      const agentInstance = new CustomAgents(this.config.url, this.proxy, this.agent_options);
+      return agentInstance.get();
+    } else {
+      return this.agent;
+    }
   }
 
   /**
@@ -351,7 +348,7 @@ class ProxyStorage implements IProxy {
     return this._setAuth(headers);
   }
 
-  private getHeadersNext(headers = {}): gotHeaders {
+  public getHeadersNext(headers = {}): gotHeaders {
     const accept = HEADERS.ACCEPT;
     const acceptEncoding = HEADERS.ACCEPT_ENCODING;
     const userAgent = HEADERS.USER_AGENT;
@@ -360,7 +357,6 @@ class ProxyStorage implements IProxy {
     headers[acceptEncoding] = headers[acceptEncoding] || 'gzip';
     // registry.npmjs.org will only return search result if user-agent include string 'npm'
     headers[userAgent] = headers[userAgent] || `npm (${this.userAgent})`;
-
     return this.setAuthNext(headers);
   }
 
@@ -421,8 +417,7 @@ class ProxyStorage implements IProxy {
    */
   private setAuthNext(headers: gotHeaders): gotHeaders {
     const { auth } = this.config;
-
-    if (_.isNil(auth) || headers[HEADERS.AUTHORIZATION]) {
+    if (typeof auth === 'undefined' || typeof headers[HEADERS.AUTHORIZATION] === 'string') {
       return headers;
     }
 
@@ -435,13 +430,12 @@ class ProxyStorage implements IProxy {
     // https://github.com/verdaccio/verdaccio/releases/tag/v2.5.0
     let token: any;
     const tokenConf: any = auth;
-
     if (_.isNil(tokenConf.token) === false && _.isString(tokenConf.token)) {
       token = tokenConf.token;
     } else if (_.isNil(tokenConf.token_env) === false) {
-      if (_.isString(tokenConf.token_env)) {
+      if (typeof tokenConf.token_env === 'string') {
         token = process.env[tokenConf.token_env];
-      } else if (_.isBoolean(tokenConf.token_env) && tokenConf.token_env) {
+      } else if (typeof tokenConf.token_env === 'boolean' && tokenConf.token_env) {
         token = process.env.NPM_TOKEN;
       } else {
         this.logger.error(constants.ERROR_CODE.token_required);
@@ -451,7 +445,7 @@ class ProxyStorage implements IProxy {
       token = process.env.NPM_TOKEN;
     }
 
-    if (_.isNil(token)) {
+    if (typeof token === 'undefined') {
       this._throwErrorAuth(constants.ERROR_CODE.token_required);
     }
 
@@ -930,7 +924,7 @@ class ProxyStorage implements IProxy {
     // in the config file.
     //
     // Otherwise misconfigured proxy could return 407
-    if (!this.agent) {
+    if (!this.proxy) {
       headers[HEADERS.FORWARDED_FOR] =
         (headers['x-forwarded-for'] ? headers['x-forwarded-for'] + ', ' : '') + remoteAddress;
     }

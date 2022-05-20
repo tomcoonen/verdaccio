@@ -66,77 +66,77 @@ describe('proxy', () => {
       jest.clearAllMocks();
     });
     describe('basic requests', () => {
-      describe('basic requests', () => {
-        test('proxy call with etag', async () => {
-          nock(domain, {
-            reqheaders: {
-              accept: 'application/json;',
-              'accept-encoding': 'gzip',
-              'x-forwarded-for': '127.0.0.1',
-              via: '1.1 foo-phseudo-bytes (Verdaccio)',
-            },
-          })
-            .get('/jquery')
-            .reply(
-              200,
-              { body: 'test' },
-              {
-                etag: () => `_ref_4444`,
-              }
-            );
-          const prox1 = new ProxyStorage(defaultRequestOptions, conf);
-          const [manifest, etag] = await prox1.getRemoteMetadataNext('jquery', {
-            remoteAddress: '127.0.0.1',
-          });
-          expect(etag).toEqual('_ref_4444');
-          expect(manifest).toEqual({ body: 'test' });
+      test('success call to remote', async () => {
+        nock(domain, {
+          reqheaders: {
+            accept: 'application/json;',
+            'accept-encoding': 'gzip',
+            'x-forwarded-for': '127.0.0.1',
+            via: '1.1 foo-phseudo-bytes (Verdaccio)',
+          },
+        })
+          .get('/jquery')
+          .reply(200, { body: 'test' });
+        const prox1 = new ProxyStorage(defaultRequestOptions, conf);
+        const [manifest] = await prox1.getRemoteMetadataNext('jquery', {
+          remoteAddress: '127.0.0.1',
         });
+        expect(manifest).toEqual({ body: 'test' });
+      });
+    });
 
-        test('proxy call with etag as option', async () => {
-          nock(domain, {
-            reqheaders: {
-              accept: 'application/json;',
-              'accept-encoding': 'gzip',
-              'x-forwarded-for': '127.0.0.1',
-              via: '1.1 foo-phseudo-bytes (Verdaccio)',
-              // match only if etag is set as option
-              'if-none-match': 'foo',
-            },
-          })
-            .get('/jquery')
-            .reply(
-              200,
-              { body: 'test' },
-              {
-                etag: () => `_ref_4444`,
-              }
-            );
-          const prox1 = new ProxyStorage(defaultRequestOptions, conf);
-          const [manifest, etag] = await prox1.getRemoteMetadataNext('jquery', {
-            etag: 'foo',
-            remoteAddress: '127.0.0.1',
-          });
-          expect(etag).toEqual('_ref_4444');
-          expect(manifest).toEqual({ body: 'test' });
-        });
-
-        test('proxy  not found', async () => {
-          nock(domain).get('/jquery').reply(404);
-          const prox1 = new ProxyStorage(defaultRequestOptions, conf);
-          await expect(
-            prox1.getRemoteMetadataNext('jquery', {
-              remoteAddress: '127.0.0.1',
-            })
-          ).rejects.toThrowError(errorUtils.getNotFound(API_ERROR.NOT_PACKAGE_UPLINK));
-          expect(mockHttp).toHaveBeenCalledTimes(1);
-          expect(mockHttp).toHaveBeenLastCalledWith(
+    describe('etag header', () => {
+      test('proxy call with etag', async () => {
+        nock(domain, {
+          reqheaders: {
+            accept: 'application/json;',
+            'accept-encoding': 'gzip',
+            'x-forwarded-for': '127.0.0.1',
+            via: '1.1 foo-phseudo-bytes (Verdaccio)',
+          },
+        })
+          .get('/jquery')
+          .reply(
+            200,
+            { body: 'test' },
             {
-              request: { method: 'GET', url: `${domain}/jquery` },
-              status: 404,
-            },
-            "@{!status}, req: '@{request.method} @{request.url}' (streaming)"
+              etag: () => `_ref_4444`,
+            }
           );
+        const prox1 = new ProxyStorage(defaultRequestOptions, conf);
+        const [manifest, etag] = await prox1.getRemoteMetadataNext('jquery', {
+          remoteAddress: '127.0.0.1',
         });
+        expect(etag).toEqual('_ref_4444');
+        expect(manifest).toEqual({ body: 'test' });
+      });
+
+      test('proxy call with etag as option', async () => {
+        nock(domain, {
+          reqheaders: {
+            accept: 'application/json;',
+            'accept-encoding': 'gzip',
+            'x-forwarded-for': '127.0.0.1',
+            via: '1.1 foo-phseudo-bytes (Verdaccio)',
+            // match only if etag is set as option
+            'if-none-match': 'foo',
+          },
+        })
+          .get('/jquery')
+          .reply(
+            200,
+            { body: 'test' },
+            {
+              etag: () => `_ref_4444`,
+            }
+          );
+        const prox1 = new ProxyStorage(defaultRequestOptions, conf);
+        const [manifest, etag] = await prox1.getRemoteMetadataNext('jquery', {
+          etag: 'foo',
+          remoteAddress: '127.0.0.1',
+        });
+        expect(etag).toEqual('_ref_4444');
+        expect(manifest).toEqual({ body: 'test' });
       });
     });
 
@@ -223,6 +223,24 @@ describe('proxy', () => {
           errorUtils.getInternalError(`${errorUtils.API_ERROR.BAD_STATUS_CODE}: 409`)
         );
       });
+
+      test('proxy  not found', async () => {
+        nock(domain).get('/jquery').reply(404);
+        const prox1 = new ProxyStorage(defaultRequestOptions, conf);
+        await expect(
+          prox1.getRemoteMetadataNext('jquery', {
+            remoteAddress: '127.0.0.1',
+          })
+        ).rejects.toThrowError(errorUtils.getNotFound(API_ERROR.NOT_PACKAGE_UPLINK));
+        expect(mockHttp).toHaveBeenCalledTimes(1);
+        expect(mockHttp).toHaveBeenLastCalledWith(
+          {
+            request: { method: 'GET', url: `${domain}/jquery` },
+            status: 404,
+          },
+          "@{!status}, req: '@{request.method} @{request.url}' (streaming)"
+        );
+      });
     });
 
     describe('retry', () => {
@@ -250,88 +268,88 @@ describe('proxy', () => {
           "retry @{retryCount} req: '@{request.method} @{request.url}'"
         );
       });
-    });
 
-    test('retry is exceded and uplink goes offline with logging activity', async () => {
-      nock(domain).get('/jquery').times(10).reply(500);
+      test('retry is exceded and uplink goes offline with logging activity', async () => {
+        nock(domain).get('/jquery').times(10).reply(500);
 
-      const prox1 = new ProxyStorage(defaultRequestOptions, conf);
-      await expect(
-        prox1.getRemoteMetadataNext('jquery', {
-          remoteAddress: '127.0.0.1',
-          retry: { limit: 2 },
-        })
-      ).rejects.toThrowError();
-      await expect(
-        prox1.getRemoteMetadataNext('jquery', {
-          remoteAddress: '127.0.0.1',
-          retry: { limit: 2 },
-        })
-      ).rejects.toThrowError(errorUtils.getInternalError(errorUtils.API_ERROR.UPLINK_OFFLINE));
-      expect(mockWarn).toHaveBeenCalledTimes(1);
-      expect(mockWarn).toHaveBeenLastCalledWith(
-        {
-          host: 'registry.npmjs.org',
-        },
-        'host @{host} is now offline'
-      );
-    });
-
-    test('fails calls and recover with 200 with log online activity', async () => {
-      // This unit test is designed to verify if the uplink goes to offline
-      // and recover after the fail_timeout has expired.
-      nock(domain)
-        .get('/jquery')
-        .thrice()
-        .reply(500, 'some-text')
-        .get('/jquery')
-        .once()
-        .reply(200, { body: { name: 'foo', version: '1.0.0' } });
-
-      const prox1 = new ProxyStorage(
-        { ...defaultRequestOptions, fail_timeout: '1s', max_fails: 1 },
-        conf
-      );
-      // force retry
-      await expect(
-        prox1.getRemoteMetadataNext('jquery', {
-          remoteAddress: '127.0.0.1',
-          retry: { limit: 2 },
-        })
-      ).rejects.toThrowError();
-      // display offline error on exausted retry
-      await expect(
-        prox1.getRemoteMetadataNext('jquery', {
-          remoteAddress: '127.0.0.1',
-          retry: { limit: 2 },
-        })
-      ).rejects.toThrowError(errorUtils.getInternalError(errorUtils.API_ERROR.UPLINK_OFFLINE));
-      expect(mockWarn).toHaveBeenCalledTimes(2);
-      expect(mockWarn).toHaveBeenLastCalledWith(
-        {
-          host: 'registry.npmjs.org',
-        },
-        'host @{host} is now offline'
-      );
-      expect(mockWarn).toHaveBeenLastCalledWith(
-        {
-          host: 'registry.npmjs.org',
-        },
-        'host @{host} is now offline'
-      );
-      // this is based on max_fails, if change that also change here acordingly
-      await setTimeout(3000);
-      const [manifest] = await prox1.getRemoteMetadataNext('jquery', {
-        retry: { limit: 2 },
+        const prox1 = new ProxyStorage(defaultRequestOptions, conf);
+        await expect(
+          prox1.getRemoteMetadataNext('jquery', {
+            remoteAddress: '127.0.0.1',
+            retry: { limit: 2 },
+          })
+        ).rejects.toThrowError();
+        await expect(
+          prox1.getRemoteMetadataNext('jquery', {
+            remoteAddress: '127.0.0.1',
+            retry: { limit: 2 },
+          })
+        ).rejects.toThrowError(errorUtils.getInternalError(errorUtils.API_ERROR.UPLINK_OFFLINE));
+        expect(mockWarn).toHaveBeenCalledTimes(1);
+        expect(mockWarn).toHaveBeenLastCalledWith(
+          {
+            host: 'registry.npmjs.org',
+          },
+          'host @{host} is now offline'
+        );
       });
-      expect(manifest).toEqual({ body: { name: 'foo', version: '1.0.0' } });
-      expect(mockWarn).toHaveBeenLastCalledWith(
-        {
-          host: 'registry.npmjs.org',
-        },
-        'host @{host} is now online'
-      );
-    }, 10000);
+
+      test('fails calls and recover with 200 with log online activity', async () => {
+        // This unit test is designed to verify if the uplink goes to offline
+        // and recover after the fail_timeout has expired.
+        nock(domain)
+          .get('/jquery')
+          .thrice()
+          .reply(500, 'some-text')
+          .get('/jquery')
+          .once()
+          .reply(200, { body: { name: 'foo', version: '1.0.0' } });
+
+        const prox1 = new ProxyStorage(
+          { ...defaultRequestOptions, fail_timeout: '1s', max_fails: 1 },
+          conf
+        );
+        // force retry
+        await expect(
+          prox1.getRemoteMetadataNext('jquery', {
+            remoteAddress: '127.0.0.1',
+            retry: { limit: 2 },
+          })
+        ).rejects.toThrowError();
+        // display offline error on exausted retry
+        await expect(
+          prox1.getRemoteMetadataNext('jquery', {
+            remoteAddress: '127.0.0.1',
+            retry: { limit: 2 },
+          })
+        ).rejects.toThrowError(errorUtils.getInternalError(errorUtils.API_ERROR.UPLINK_OFFLINE));
+        expect(mockWarn).toHaveBeenCalledTimes(2);
+        expect(mockWarn).toHaveBeenLastCalledWith(
+          {
+            host: 'registry.npmjs.org',
+          },
+          'host @{host} is now offline'
+        );
+        expect(mockWarn).toHaveBeenLastCalledWith(
+          {
+            host: 'registry.npmjs.org',
+          },
+          'host @{host} is now offline'
+        );
+        // this is based on max_fails, if change that also change here acordingly
+        await setTimeout(3000);
+        const [manifest] = await prox1.getRemoteMetadataNext('jquery', {
+          retry: { limit: 2 },
+        });
+        expect(manifest).toEqual({ body: { name: 'foo', version: '1.0.0' } });
+        expect(mockWarn).toHaveBeenLastCalledWith(
+          {
+            host: 'registry.npmjs.org',
+          },
+          'host @{host} is now online'
+        );
+      }, 10000);
+    });
   });
 
   describe('getRemoteMetadata (deprecated remove)', () => {

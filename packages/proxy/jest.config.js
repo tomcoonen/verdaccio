@@ -6,8 +6,8 @@ module.exports = Object.assign({}, config, {
     global: {
       branches: 75,
       functions: 90,
-      lines: 85,
-      statements: 88,
+      lines: 84,
+      statements: 84,
     },
   },
 });

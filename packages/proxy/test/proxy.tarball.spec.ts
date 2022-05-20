@@ -1,16 +1,8 @@
-import _ from 'lodash';
 import nock from 'nock';
 import path from 'path';
 
 import { Config, parseConfigFile } from '@verdaccio/config';
-import {
-  API_ERROR,
-  HEADERS,
-  HEADER_TYPE,
-  HTTP_STATUS,
-  VerdaccioError,
-  errorUtils,
-} from '@verdaccio/core';
+import { API_ERROR, HEADER_TYPE, HTTP_STATUS, VerdaccioError, errorUtils } from '@verdaccio/core';
 
 import { ProxyStorage } from '../src';
 
